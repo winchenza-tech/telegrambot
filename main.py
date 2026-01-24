@@ -1,4 +1,4 @@
-re
+
 import telebot
 import time
 from flask import Flask
@@ -10,7 +10,7 @@ TOKEN = "8483171566:AAFQvX8C4bFHLKvjLbjJErcu9TRCrqSANtY"
 # İstediğiniz kadar paketi tırnak içinde, aralarına virgül koyarak ekleyebilirsiniz.
 YASAKLI_PAKETLER = [
     "OldiesButGoldies5",
-    "ino825"
+    "ino8723"
 
 ]
 # ----------------
