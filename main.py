@@ -12,7 +12,7 @@ from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, Callb
 from google import genai
 from google.genai import types
 
-# --- 1. WEB SUNUCUSU (Port: 8081) ---
+# --- 1. WEB SUNUCUSU ---
 flask_app = Flask('')
 
 @flask_app.route('/')
@@ -20,7 +20,8 @@ def home():
     return "Zenithar Services Aktif! (Tarot, Burç, Özetleme ve Sticker Engelleyici)"
 
 def run_flask():
-    port = int(os.environ.get("PORT", 8081))
+    # Standart port genellikle 8080'dir, çakışma yoksa 8080 kullan
+    port = int(os.environ.get("PORT", 8080))
     flask_app.run(host='0.0.0.0', port=port)
 
 def keep_alive():
@@ -29,9 +30,14 @@ def keep_alive():
 
 # --- 2. AYARLAR ---
 nest_asyncio.apply()
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  # Services Bot Token
+
+# Environment Variable'ların dolu olduğundan emin ol
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-AUTHORIZED_GROUP_ID = -1003297262036  # Es Justo Grup ID
+AUTHORIZED_GROUP_ID = -1003297262036 
+
+# MODEL İSMİ GÜNCELLENDİ (2.5 -> 2.0)
+MODEL_NAME = 'gemini-2.0-flash'
 
 # --- 🚫 YASAKLI STICKER PAKETLERİ ---
 YASAKLI_PAKETLER = [
@@ -82,6 +88,7 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     target = update.message.reply_to_message
     
+    # GÖRSEL ÖZETLEME
     if target.photo:
         status_msg = await update.message.reply_text("🖼️ Görsel inceleniyor...")
         try:
@@ -94,7 +101,7 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             prompt_text = "Bu resmi Türkçe özetle. Maks 50 kelime."
 
             res = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model=MODEL_NAME,
                 contents=[
                     types.Content(
                         parts=[
@@ -109,22 +116,25 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await status_msg.edit_text(f"📝GÖRSEL ÖZETİ:\n\n{res.text}")
         except Exception as e:
+            print(f"Görsel hata: {e}")
             await status_msg.edit_text(f"⚠️ Hata: {e}")
 
+    # METİN ÖZETLEME
     elif target.text or target.caption:
         content = target.text or target.caption
         status_msg = await update.message.reply_text("📝 Metin özetleniyor...")
         try:
             res = client.models.generate_content(
-                model='gemini-2.5-flash',
+                model=MODEL_NAME,
                 contents=f"Özetle: {content}",
                 config=types.GenerateContentConfig(
                     safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')]
                 )
             )
             await status_msg.edit_text(f"📝 METİN ÖZETİ:\n\n{res.text}")
-        except:
-            pass
+        except Exception as e:
+            print(f"Metin hata: {e}")
+            await status_msg.edit_text("❌ Özetlenirken hata oluştu.")
     else:
         await update.message.reply_text("❌ Özetlenecek metin veya görsel bulunamadı.")
 
@@ -136,21 +146,26 @@ async def tarot_command(update, context):
     prompt = f"Tarot falı yorumla. Kartlar: Geçmiş: {secilenler[0]}, Şimdi: {secilenler[1]}, Gelecek: {secilenler[2]}. Mistik bir dille maks 100 kelime."
     try:
         res = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model=MODEL_NAME,
             contents=prompt,
             config=types.GenerateContentConfig(
                 safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')]
             )
         )
         await status.edit_text(f"🔮 TAROT FALI:\n\n🃏 Kartlar: {', '.join(secilenler)}\n\n📜 Yorum:\n{res.text}")
-    except:
+    except Exception as e:
+        print(f"Tarot Hata: {e}")
         await status.edit_text("Ruhlar alemine ulaşılamadı.")
 
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID or not context.args:
+        await update.message.reply_text("Örnek kullanım: /burcyorumla koc")
         return
     
     burc = context.args[0].lower()
+    mapping = {"koc": "koç", "boga": "boğa", "yengec": "yengeç", "basak": "başak", "oglak": "oğlak", "balik": "balık"}
+    if burc in mapping: burc = mapping[burc]
+
     if burc not in ZODIAC_EMOJIS:
         await update.message.reply_text("Lütfen geçerli bir burç adı girin.")
         return
@@ -173,14 +188,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await query.edit_message_text(f"{ZODIAC_EMOJIS.get(burc, '')} Yıldızlar hizalanıyor...")
         res = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model=MODEL_NAME,
             contents=prompt,
             config=types.GenerateContentConfig(
                 safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')]
             )
         )
         await query.edit_message_text(text=f"✨ {burc.upper()} {tur.upper()} YORUMU:\n\n{res.text}")
-    except:
+    except Exception as e:
+        print(f"Burç Hata: {e}")
         await query.edit_message_text(text="Yıldız bağlantısı koptu.")
 
 # --- 5. ANA ÇALIŞTIRICI ---
@@ -198,6 +214,7 @@ async def main():
     # Sticker Engelleyici
     application.add_handler(MessageHandler(filters.Sticker.ALL, delete_forbidden_stickers))
     
+    print("Services Bot Başlatıldı...")
     await application.initialize()
     await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
