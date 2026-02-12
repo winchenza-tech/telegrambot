@@ -194,7 +194,7 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if "GECERSIZ" in res.text:
             await status_msg.edit_text("❌ Ayol bu ne? Ben burada kahve fincanı göremedim. Git bana düzgün içilmiş bir kahve fotosu getir.")
         else:
-            await status_msg.edit_text(f"☕ FALCI BACI DİYOR Kİ:\n\n{res.text}")
+            await status_msg.edit_text(f"☕ Falcı Cıtkırıldroid diyor ki:\n\n{res.text}")
 
     except Exception as e:
         print(f"Fal hatası: {e}")
