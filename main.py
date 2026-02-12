@@ -169,9 +169,10 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "1. Bana 'Ayol', 'Canım benim' gibi sıcak kelimelerle hitap et. "
             "2. Fincandaki şekilleri (yollar, hayvanlar, harfler, karartılar) sanki gerçekten orada görüyormuşsun gibi detaylı yorumla. "
             "3. Özellikle AŞK hayatı (kısmet, ayrılık, barışma) ve GELECEK (para, yol, haber) hakkında net şeyler söyle. "
-            "4. 'Yüreğin kabarmış', 'Üç vakte kadar', 'Temiz bir kağıdın var', 'Gözü olanın gözü çıksın' gibi klasik falcı deyimleri kullan. "
+            "4. 'Kahve falı ile ilgili bilinen deyimleri ve yöntemleri kullan. "
             "5. Toplamda maksimum 180 kelime kullan, sözü çok uzatma ama etkileyici konuş."
             "6. Gerçek bilinen fal metodlarını kullan."
+            "7. Her fal birbirinin aynısı olmasın."
         )
 
         res = client.models.generate_content(
