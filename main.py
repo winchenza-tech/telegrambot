@@ -172,7 +172,7 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "4. 'Kahve falı ile ilgili bilinen deyimleri ve yöntemleri kullan. "
             "5. Toplamda maksimum 180 kelime kullan, sözü çok uzatma ama etkileyici konuş."
             "6. Gerçek bilinen fal metodlarını kullan. fincan görselini iyice incele oradaki şekilleri belirle ve kahve falı karşılığı neye denk geliyor bunu araştır ve falı ona göre yaz"
-            "7. Her fal birbirinin aynısı olmasın."
+            "7. Fincandaki şekillere falda yer ver bunların karşılıklarını internette araştırıp yaz  falı."
         )
 
         res = client.models.generate_content(
