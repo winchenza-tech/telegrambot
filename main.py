@@ -17,10 +17,9 @@ flask_app = Flask('')
 
 @flask_app.route('/')
 def home():
-    return "Zenithar Services Aktif! (Tarot, Burç, Özetleme, Fal ve Sticker Engelleyici)"
+    return "Zenithar Services Aktif! (Tarot, Burç, Özetleme, Falcı Teyze ve Sticker Engelleyici)"
 
 def run_flask():
-    # Standart port genellikle 8080'dir, çakışma yoksa 8080 kullan
     port = int(os.environ.get("PORT", 8080))
     flask_app.run(host='0.0.0.0', port=port)
 
@@ -31,12 +30,10 @@ def keep_alive():
 # --- 2. AYARLAR ---
 nest_asyncio.apply()
 
-# Environment Variable'ların dolu olduğundan emin ol
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 AUTHORIZED_GROUP_ID = -1003297262036 
 
-# MODEL İSMİ (2.0 Flash)
 MODEL_NAME = 'gemini-2.0-flash'
 
 # --- 🚫 YASAKLI STICKER PAKETLERİ ---
@@ -138,34 +135,43 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Özetlenecek metin veya görsel bulunamadı.")
 
-# --- YENİ EKLENEN KAHVE FALI FONKSİYONU ---
+# --- KAHVE FALI (FALCI TEYZE MODU) ---
 async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID:
         return
 
-    # Görseli bul (Mesajın kendisinde mi yoksa yanıtlanan mesajda mı?)
-    target_msg = update.message.reply_to_message if update.message.reply_to_message else update.message
-    
-    if not target_msg.photo:
-        await update.message.reply_text("☕ Fal bakmam için kahve fincanının fotoğrafını çekip göndermeli (/falbak yazarak) veya fincan fotoğrafına yanıt vermelisin.")
+    # Görseli bulma mantığı:
+    # 1. Eğer mesajın kendisinde fotoğraf varsa (Caption olarak yazıldıysa)
+    if update.message.photo:
+        photo_obj = update.message.photo[-1]
+    # 2. Eğer bir mesaja yanıt verildiyse ve o mesajda fotoğraf varsa
+    elif update.message.reply_to_message and update.message.reply_to_message.photo:
+        photo_obj = update.message.reply_to_message.photo[-1]
+    else:
+        await update.message.reply_text("☕ Ayol fal bakmam için kahve fincanının fotoğrafını atıp altına /falbak yazman ya da fotoya yanıt vermen lazım.")
         return
 
-    status_msg = await update.message.reply_text("☕ Fincan inceleniyor, telveler okunuyor...")
+    status_msg = await update.message.reply_text("☕ Cıtkırıldoid kahve telvelerini inceliyor...")
 
     try:
         # Fotoğrafı indir
-        photo_file = await target_msg.photo[-1].get_file()
+        photo_file = await photo_obj.get_file()
         f = io.BytesIO()
         await photo_file.download_to_memory(f)
         f.seek(0)
         image_bytes = f.read()
 
-        # Kahve falı için özel prompt
+        # Falcı Teyze Prompt'u
         prompt_text = (
-            "Bu görseli analiz et. Öncelikle bu görselin bir Türk kahvesi fincanı, tabağı veya kahve telvesi olup olmadığını kontrol et. "
-            "Eğer görselde kahve falı ile alakalı bir fincan veya telve YOKSA, sadece 'GECERSIZ' yazıp dur. "
-            "Eğer görsel uygunsa, fincandaki şekilleri ve sembolleri mistik, gizemli ve sürükleyici bir dille yorumla. "
-            "Geleceğe dair çıkarımlar yap. Yorumun maksimum 120 kelime olsun."
+            "Sen geleneksel, samimi, biraz meraklı ama çok tatlı dilli yaşlı bir Türk falcı teyzesisin. "
+            "Öncelikle görsele bak: Bu bir Türk kahvesi fincanı, tabağı veya telvesi mi? "
+            "Eğer kahve falıysa: "
+            "1. Bana 'Ayol', 'Canım benim' gibi sıcak kelimelerle hitap et. "
+            "2. Fincandaki şekilleri (yollar, hayvanlar, harfler, karartılar) sanki gerçekten orada görüyormuşsun gibi detaylı yorumla. "
+            "3. Özellikle AŞK hayatı (kısmet, ayrılık, barışma) ve GELECEK (para, yol, haber) hakkında net şeyler söyle. "
+            "4. 'Yüreğin kabarmış', 'Üç vakte kadar', 'Temiz bir kağıdın var', 'Gözü olanın gözü çıksın' gibi klasik falcı deyimleri kullan. "
+            "5. Toplamda maksimum 180 kelime kullan, sözü çok uzatma ama etkileyici konuş."
+            "6. Gerçek bilinen fal metodlarını kullan."
         )
 
         res = client.models.generate_content(
@@ -185,20 +191,20 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Yanıtı kontrol et
         if "GECERSIZ" in res.text:
-            await status_msg.edit_text("❌ Bu görselde bir kahve fincanı veya telve göremedim. Lütfen net bir kahve falı fotoğrafı gönder.")
+            await status_msg.edit_text("❌ Ayol bu ne? Ben burada kahve fincanı göremedim. Git bana düzgün içilmiş bir kahve fotosu getir.")
         else:
-            await status_msg.edit_text(f"☕ KAHVE FALI YORUMU:\n\n{res.text}")
+            await status_msg.edit_text(f"☕ FALCI BACI DİYOR Kİ:\n\n{res.text}")
 
     except Exception as e:
         print(f"Fal hatası: {e}")
-        await status_msg.edit_text("⚠️ Ruhlar alemine bağlanırken bir hata oluştu.")
+        await status_msg.edit_text("⚠️ Ay başıma ağrılar girdi, enerjiyi alamadım. ")
 
 async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID:
         return
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
-    prompt = f"Tarot falı yorumla. Kartlar: Geçmiş: {secilenler[0]}, Şimdi: {secilenler[1]}, Gelecek: {secilenler[2]}. Mistik bir dille maks 100 kelime."
+    prompt = f"Tarot falı yorumla. Kartlar: Geçmiş: {secilenler[0]}, Şimdi: {secilenler[1]}, Gelecek: {secilenler[2]}. Mistik biraz da samimi bir dille maks 100 kelime."
     try:
         res = client.models.generate_content(
             model=MODEL_NAME,
@@ -214,8 +220,6 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID:
-        # Grup kontrolü sadece burada var, mesaj atarsa çalışır ama işlem yapmaz.
-        # Eğer botu her yerde kullanmak istersen bu IF bloğunu kaldırabilirsin.
         return
         
     if not context.args:
@@ -270,7 +274,7 @@ async def main():
     application.add_handler(CommandHandler("burcyorumla", burcyorumla_command))
     application.add_handler(CommandHandler("ozetle", ozetle_command))
     
-    # Yeni Fal Komutu
+    # Fal Komutu
     application.add_handler(CommandHandler("falbak", falbak_command))
     
     application.add_handler(CallbackQueryHandler(button_handler))
@@ -283,8 +287,6 @@ async def main():
     await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
     
-    # Flask sunucusu thread'de çalıştığı için ana döngüyü burada tutuyoruz
-    # while True döngüsü yerine Event.wait kullanmak daha CPU dostudur ama senin yapını bozmadım.
     while True:
         await asyncio.sleep(3600)
 
