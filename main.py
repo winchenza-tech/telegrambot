@@ -17,7 +17,7 @@ flask_app = Flask('')
 
 @flask_app.route('/')
 def home():
-    return "Zenithar Services Aktif! (Tarot, Burç, Özetleme ve Sticker Engelleyici)"
+    return "Zenithar Services Aktif! (Tarot, Burç, Özetleme, Fal ve Sticker Engelleyici)"
 
 def run_flask():
     # Standart port genellikle 8080'dir, çakışma yoksa 8080 kullan
@@ -36,7 +36,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 AUTHORIZED_GROUP_ID = -1003297262036 
 
-# MODEL İSMİ GÜNCELLENDİ (2.5 -> 2.0)
+# MODEL İSMİ (2.0 Flash)
 MODEL_NAME = 'gemini-2.0-flash'
 
 # --- 🚫 YASAKLI STICKER PAKETLERİ ---
@@ -138,7 +138,62 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("❌ Özetlenecek metin veya görsel bulunamadı.")
 
-async def tarot_command(update, context):
+# --- YENİ EKLENEN KAHVE FALI FONKSİYONU ---
+async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID:
+        return
+
+    # Görseli bul (Mesajın kendisinde mi yoksa yanıtlanan mesajda mı?)
+    target_msg = update.message.reply_to_message if update.message.reply_to_message else update.message
+    
+    if not target_msg.photo:
+        await update.message.reply_text("☕ Fal bakmam için kahve fincanının fotoğrafını çekip göndermeli (/falbak yazarak) veya fincan fotoğrafına yanıt vermelisin.")
+        return
+
+    status_msg = await update.message.reply_text("☕ Fincan inceleniyor, telveler okunuyor...")
+
+    try:
+        # Fotoğrafı indir
+        photo_file = await target_msg.photo[-1].get_file()
+        f = io.BytesIO()
+        await photo_file.download_to_memory(f)
+        f.seek(0)
+        image_bytes = f.read()
+
+        # Kahve falı için özel prompt
+        prompt_text = (
+            "Bu görseli analiz et. Öncelikle bu görselin bir Türk kahvesi fincanı, tabağı veya kahve telvesi olup olmadığını kontrol et. "
+            "Eğer görselde kahve falı ile alakalı bir fincan veya telve YOKSA, sadece 'GECERSIZ' yazıp dur. "
+            "Eğer görsel uygunsa, fincandaki şekilleri ve sembolleri mistik, gizemli ve sürükleyici bir dille yorumla. "
+            "Geleceğe dair çıkarımlar yap. Yorumun maksimum 120 kelime olsun."
+        )
+
+        res = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[
+                types.Content(
+                    parts=[
+                        types.Part.from_text(text=prompt_text),
+                        types.Part.from_bytes(data=image_bytes, mime_type="image/jpeg")
+                    ]
+                )
+            ],
+            config=types.GenerateContentConfig(
+                safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')]
+            )
+        )
+
+        # Yanıtı kontrol et
+        if "GECERSIZ" in res.text:
+            await status_msg.edit_text("❌ Bu görselde bir kahve fincanı veya telve göremedim. Lütfen net bir kahve falı fotoğrafı gönder.")
+        else:
+            await status_msg.edit_text(f"☕ KAHVE FALI YORUMU:\n\n{res.text}")
+
+    except Exception as e:
+        print(f"Fal hatası: {e}")
+        await status_msg.edit_text("⚠️ Ruhlar alemine bağlanırken bir hata oluştu.")
+
+async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID:
         return
     secilenler = random.sample(TAROT_CARDS, 3)
@@ -158,7 +213,12 @@ async def tarot_command(update, context):
         await status.edit_text("Ruhlar alemine ulaşılamadı.")
 
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != AUTHORIZED_GROUP_ID or not context.args:
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID:
+        # Grup kontrolü sadece burada var, mesaj atarsa çalışır ama işlem yapmaz.
+        # Eğer botu her yerde kullanmak istersen bu IF bloğunu kaldırabilirsin.
+        return
+        
+    if not context.args:
         await update.message.reply_text("Örnek kullanım: /burcyorumla koc")
         return
     
@@ -209,6 +269,10 @@ async def main():
     application.add_handler(CommandHandler("tarotbak", tarot_command))
     application.add_handler(CommandHandler("burcyorumla", burcyorumla_command))
     application.add_handler(CommandHandler("ozetle", ozetle_command))
+    
+    # Yeni Fal Komutu
+    application.add_handler(CommandHandler("falbak", falbak_command))
+    
     application.add_handler(CallbackQueryHandler(button_handler))
     
     # Sticker Engelleyici
@@ -219,6 +283,8 @@ async def main():
     await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
     
+    # Flask sunucusu thread'de çalıştığı için ana döngüyü burada tutuyoruz
+    # while True döngüsü yerine Event.wait kullanmak daha CPU dostudur ama senin yapını bozmadım.
     while True:
         await asyncio.sleep(3600)
 
