@@ -6,10 +6,11 @@ import io
 import datetime
 import pytz
 import re 
+import requests # İnternetten güncel burç çekmek için eklendi
 from flask import Flask
 from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, CommandHandler, CallbackQueryHandler, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
 from google import genai
 from google.genai import types
 
@@ -18,7 +19,7 @@ flask_app = Flask('')
 
 @flask_app.route('/')
 def home():
-    return "Zenithar Services Aktif! (Gerçekçi Falcı Teyze Devrede)"
+    return "Zenithar Services Aktif! (Güncel Veri Destekli Astrolog)"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -127,17 +128,13 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f.seek(0)
         image_bytes = f.read()
 
-        # Sertleştirilmiş ve Detaycı Prompt
         prompt_text = (
             "Sen geleneksel, dobra, her şeyi olduğu gibi söyleyen eski bir Türk falcı teyzesisin. "
-            "Görsele çok dikkatli bak. Sadece 'ne güzel fal' diyerek geçiştirme, gerçek bir falcı gibi eleştir. "
-            "GÖREVLERİN: "
-            "1. Fincandaki lekeleri analiz et. Örneğin; 'Kenarda bir kuş kabarmış', 'Dibe doğru bir karartı çökmüş', 'Şurada bir E harfi gördüm' gibi spesifik konuş. "
-            "2. Gördüğün bu şekilleri; Aşk, Para, Yol ve Hanedeki huzur ile ilişkilendir. "
-            "3. Eğer fincan çok karışıksa 'Ay için çok şişmiş, dertlerin üst üste binmiş' de. "
-            "4. 'Nazar var sende evladım', 'Yolun kapalı ama bir haber bekliyorsun' gibi geleneksel ve gizemli tabirler kullan. "
-            "5. Samimi ama ciddi ol. Maksimum 150 kelime. "
-            "6. Eğer görsel kahve fincanı değilse 'Evladım bu kahve değil ki ben buna nasıl bakayım?' diyerek sitem et."
+            "Görsele çok dikkatli bak. GÖREVLERİN: "
+            "1. Fincandaki lekeleri analiz et. 'Kenarda kuş kabarmış', 'Dibe karartı çökmüş' gibi spesifik ol. "
+            "2. Gördüğün bu şekilleri Aşk, Para, Yol ile ilişkilendir. "
+            "3. 'Nazar var sende evladım', 'Yolun kapalı' gibi geleneksel tabirler kullan. "
+            "4. Maksimum 150 kelime. Eğer görsel kahve değilse fırça at."
         )
 
         res = client.models.generate_content(
@@ -154,9 +151,7 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         await status_msg.edit_text(f"☕ Falcı Teyze diyor ki:\n\n{res.text}")
-
-    except Exception as e:
-        print(f"Fal hatası: {e}")
+    except:
         await status_msg.edit_text("⚠️ Enerjin çok ağır geldi evladım, fincanı okuyamadım.")
 
 async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169,7 +164,19 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(f"🔮 TAROT FALI:\n\n🃏 Kartlar: {', '.join(secilenler)}\n\n📜 Yorum:\n{res.text}")
     except: await status.edit_text("Ruhlar alemine ulaşılamadı.")
 
-# --- ✨ DİNAMİK BURÇ MOTORU ---
+# --- ✨ GÜNCEL VERİ DESTEKLİ BURÇ MOTORU ---
+def get_daily_horoscope_data(burc):
+    # Dış kaynaktan günlük veri çekme fonksiyonu
+    try:
+        # Örnek bir burç API'si (Eğer bu API değişirse url güncellenebilir)
+        url = f"https://burc-api.vercel.app/api/{burc}"
+        response = requests.get(url, timeout=5)
+        if response.status_code == 200:
+            return response.json().get("yorum", "")
+    except:
+        return ""
+    return ""
+
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID: return
     metin = update.message.text.lower()
@@ -177,29 +184,39 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     args = temiz_metin.split()
     
     if not args:
-        await update.message.reply_text("❗ Örnek kullanım: /burcyorumla koc")
+        await update.message.reply_text("❗ Örnek kullanım: /burcyorumla akrep")
         return
     
-    burc = args[0]
-    mapping = {"koc": "koç", "boga": "boğa", "yengec": "yengeç", "basak": "başak", "oglak": "oğlak", "balik": "balık"}
-    if burc in mapping: burc = mapping[burc]
-    if burc not in ZODIAC_EMOJIS:
-        await update.message.reply_text("❗ Geçerli bir burç yazmalısın evladım.")
-        return
+    burc_input = args[0]
+    mapping = {"koc": "koc", "boga": "boga", "ikizler": "ikizler", "yengec": "yengec", "aslan": "aslan", "basak": "basak", "terazi": "terazi", "akrep": "akrep", "yay": "yay", "oglak": "oglak", "kova": "kova", "balik": "balik"}
     
-    tur = "günlük"
-    if len(args) > 1 and args[1] in ["haftalik", "haftalık"]: tur = "haftalık"
-
-    status_msg = await update.message.reply_text(f"{ZODIAC_EMOJIS[burc]} {burc.capitalize()} için yıldızlar sorgulanıyor...")
+    # API uyumlu isim
+    api_burc = mapping.get(burc_input, burc_input)
+    # Ekranda şık görünecek isim
+    display_burc = burc_input if burc_input not in ZODIAC_EMOJIS else burc_input
+    
+    status_msg = await update.message.reply_text(f"🛰️ Güncel gökyüzü verileri çekiliyor...")
 
     try:
+        # 1. Gerçek veriyi internetten çek
+        raw_data = await asyncio.to_thread(get_daily_horoscope_data, api_city := api_burc)
+        
         tz = pytz.timezone("Europe/Istanbul")
         date_str = datetime.datetime.now(tz).strftime("%d-%m-%Y")
-        prompt = (f"Tarih: {date_str}. {burc} burcu için {tur} astrolojik yorum yap. "
-                  "Güncel gezegen dizilimlerini düşün. Maks 80 kelime. Her gün benzersiz yorum yap.")
+
+        # 2. Gemini'ye bu veriyi kendi tarzıyla yorumlat
+        prompt = (
+            f"Bugünün tarihi: {date_str}. Kaynaktan gelen günlük burç yorumu şu: '{raw_data}'. "
+            f"Sen yetenekli bir astrologsun. Bu ham veriyi al ve {api_burc} burcu için "
+            f"kendi tarzınla, daha esprili, derin ve ilgi çekici bir şekilde yeniden yorumla. "
+            f"Eğer ham veri boşsa, genel gökyüzü olaylarını düşünerek yaratıcı ol. Maks 100 kelime."
+        )
+
         res = client.models.generate_content(model=MODEL_NAME, contents=prompt)
-        await status_msg.edit_text(f"✨ {burc.upper()} {tur.upper()} YORUMU ({date_str}):\n\n{res.text}")
-    except: await status_msg.edit_text("❌ Yıldızlar bugün görünmüyor.")
+        await status_msg.edit_text(f"✨ {api_burc.upper()} GÜNLÜK YORUMU ({date_str}):\n\n{res.text}")
+    except Exception as e:
+        print(f"Hata: {e}")
+        await status_msg.edit_text("❌ Yıldızlar bugün biraz utangaç, veriye ulaşılamadı.")
 
 # --- 5. ANA ÇALIŞTIRICI ---
 
@@ -207,13 +224,11 @@ async def main():
     keep_alive()
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
-    # Tüm Komutları Regex İle Yakalıyoruz (Çoklu Bot Engelini Aşar)
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/tarotbak'), tarot_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/burcyorumla'), burcyorumla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/falbak'), falbak_command))
     
-    # Sticker Engelleyici
     application.add_handler(MessageHandler(filters.Sticker.ALL, delete_forbidden_stickers))
     
     print("Services Bot Başlatıldı...")
