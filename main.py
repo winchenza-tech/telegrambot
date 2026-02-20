@@ -141,10 +141,8 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Görseli bulma mantığı:
-    # 1. Eğer mesajın kendisinde fotoğraf varsa (Caption olarak yazıldıysa)
     if update.message.photo:
         photo_obj = update.message.photo[-1]
-    # 2. Eğer bir mesaja yanıt verildiyse ve o mesajda fotoğraf varsa
     elif update.message.reply_to_message and update.message.reply_to_message.photo:
         photo_obj = update.message.reply_to_message.photo[-1]
     else:
@@ -154,14 +152,12 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     status_msg = await update.message.reply_text("☕ Cıtkırıldoid kahve telvelerini inceliyor...")
 
     try:
-        # Fotoğrafı indir
         photo_file = await photo_obj.get_file()
         f = io.BytesIO()
         await photo_file.download_to_memory(f)
         f.seek(0)
         image_bytes = f.read()
 
-        # Falcı Teyze Prompt'u
         prompt_text = (
             "Sen geleneksel, samimi, biraz meraklı ama çok tatlı dilli yaşlı bir Türk falcı teyzesisin. "
             "Öncelikle görsele bak: Bu bir Türk kahvesi fincanı, tabağı veya telvesi mi? "
@@ -190,7 +186,6 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         )
 
-        # Yanıtı kontrol et
         if "GECERSIZ" in res.text:
             await status_msg.edit_text("❌ Ayol bu ne? Ben burada kahve fincanı göremedim. Git bana düzgün içilmiş bir kahve fotosu getir.")
         else:
@@ -219,12 +214,13 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         print(f"Tarot Hata: {e}")
         await status.edit_text("Ruhlar alemine ulaşılamadı.")
 
+# --- YENİ DİNAMİK BURÇ MOTORU ---
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != AUTHORIZED_GROUP_ID:
         return
         
     if not context.args:
-        await update.message.reply_text("Örnek kullanım: /burcyorumla koc")
+        await update.message.reply_text("❗ Örnek kullanım: /burcyorumla koc\n(Haftalık için: /burcyorumla koc haftalik)")
         return
     
     burc = context.args[0].lower()
@@ -232,26 +228,30 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     if burc in mapping: burc = mapping[burc]
 
     if burc not in ZODIAC_EMOJIS:
-        await update.message.reply_text("Lütfen geçerli bir burç adı girin.")
+        await update.message.reply_text("❗ Lütfen geçerli bir burç adı girin. (Örn: akrep, yengec, kova)")
         return
     
-    keyboard = [
-        [
-            InlineKeyboardButton("Günlük", callback_data=f"gunluk|{burc}"),
-            InlineKeyboardButton("Haftalık", callback_data=f"haftalik|{burc}")
-        ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(f"{ZODIAC_EMOJIS[burc]} {burc.upper()} periyot seç:", reply_markup=reply_markup)
+    # Kullanıcı 2. kelime olarak 'haftalik' yazarsa haftalık yorumlar, yazmazsa günlük
+    tur = "günlük"
+    if len(context.args) > 1 and context.args[1].lower() in ["haftalik", "haftalık"]:
+        tur = "haftalık"
 
-async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    
-    tur, burc = query.data.split("|")
-    prompt = f"{burc} burcu için {tur} astrolojik yorum yap. Maks 70 kelime."
+    status_msg = await update.message.reply_text(f"{ZODIAC_EMOJIS[burc]} {burc.capitalize()} burcu için {tur} yıldız haritası inceleniyor...")
+
     try:
-        await query.edit_message_text(f"{ZODIAC_EMOJIS.get(burc, '')} Yıldızlar hizalanıyor...")
+        # Dinamik tarih alınıyor (Her gün benzersiz yorum için)
+        tz = pytz.timezone("Europe/Istanbul")
+        now = datetime.datetime.now(tz)
+        date_str = now.strftime("%d-%m-%Y")
+
+        prompt = (
+            f"Bugünün tarihi: {date_str}. Sen çok yetenekli bir astrologsun. "
+            f"Lütfen bugünün gerçek astrolojik gökyüzü olaylarını, gezegen dizilimlerini ve ay fazını dikkate alarak "
+            f"{burc} burcu için {tur} astroloji yorumu yap. "
+            f"DİKKAT: Her gün aynı standart metni yazma! Yorumun kesinlikle bugüne/bu haftaya özel, güncel ve spesifik olsun. "
+            f"Maksimum 80 kelime kullan ve samimi bir dil tercih et."
+        )
+
         res = client.models.generate_content(
             model=MODEL_NAME,
             contents=prompt,
@@ -259,10 +259,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')]
             )
         )
-        await query.edit_message_text(text=f"✨ {burc.upper()} {tur.upper()} YORUMU:\n\n{res.text}")
+        await status_msg.edit_text(f"✨ {burc.upper()} {tur.upper()} YORUMU ({date_str}):\n\n{res.text}")
     except Exception as e:
         print(f"Burç Hata: {e}")
-        await query.edit_message_text(text="Yıldız bağlantısı koptu.")
+        await status_msg.edit_text("❌ Yıldız bağlantısı koptu. Lütfen tekrar dene.")
 
 # --- 5. ANA ÇALIŞTIRICI ---
 
@@ -272,13 +272,11 @@ async def main():
     
     # Komutlar
     application.add_handler(CommandHandler("tarotbak", tarot_command))
-    application.add_handler(CommandHandler("burcyorumla", burcyorumla_command))
+    application.add_handler(CommandHandler("burcyorumla", burcyorumla_command)) # Butonsuz direkt komut çalışacak
     application.add_handler(CommandHandler("ozetle", ozetle_command))
     
     # Fal Komutu
     application.add_handler(CommandHandler("falbak", falbak_command))
-    
-    application.add_handler(CallbackQueryHandler(button_handler))
     
     # Sticker Engelleyici
     application.add_handler(MessageHandler(filters.Sticker.ALL, delete_forbidden_stickers))
