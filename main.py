@@ -1,12 +1,12 @@
+import os
+import re 
+import io
+import random
 import asyncio
 import nest_asyncio
-import os
-import random
-import io
+import requests 
 import datetime
 import pytz
-import re 
-import requests 
 from flask import Flask
 from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,7 +15,7 @@ from google import genai
 from google.genai import types
 
 # --- 1. WEB SUNUCUSU ---
-flask_app = Flask('')
+flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
@@ -176,4 +176,4 @@ async def main():
 
 if __name__ == "__main__":
     try: asyncio.run(main())
-    except: pass
+    except Exception as e: print(f"Hata: {e}")
