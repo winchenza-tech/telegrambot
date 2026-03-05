@@ -117,7 +117,7 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
     try:
-        res = client.models.generate_content(model=MODEL_NAME, contents=f"Tarot: {', '.join(secilenler)} yorumla. Maks 100 kelime.")
+        res = client.models.generate_content(model=MODEL_NAME, contents=f"Tarot: {', '.join(secilenler)} mistik biraz da samimi bir dille yorumla. Maks 100 kelime kullan. * sembolü kullanma. yorumda kartlardan bahsederken 'asılan adam' gibi değil asılan adam kartı gibi bahset yani tarot bilmeyen biri dahi anlayabilsin. geçmiş şimdi ve gelecek kartlarını 3 ayrı paragrafa böl.")
         await status.edit_text(f"🔮 TAROT FALI:\n\n🃏 Kartlar: {', '.join(secilenler)}\n\n📜 Yorum:\n{res.text}")
     except: await status.edit_text("Ruhlar alemine ulaşılamadı.")
 
