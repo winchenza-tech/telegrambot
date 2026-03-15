@@ -1,16 +1,13 @@
-import os
-import re 
-import io
-import random
 import asyncio
 import nest_asyncio
-import requests 
 import datetime
-import pytz
+import os
+import random
+from collections import deque
 from flask import Flask
 from threading import Thread
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram import Update
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, CommandHandler, filters
 from google import genai
 from google.genai import types
 
@@ -19,7 +16,7 @@ flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
-    return "Zenithar Services Aktif! (Tam Erişim Modu)"
+    return "Zenithar 7/24 Görev Başında!"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -29,29 +26,35 @@ def keep_alive():
     t = Thread(target=run_flask)
     t.start()
 
-# --- 2. AYARLAR ---
+# --- 2. AYARLAR VE HAFIZA ---
 nest_asyncio.apply()
 
-TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
+TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-AUTHORIZED_GROUP_ID = -1003297262036 
 
+AUTHORIZED_GROUP_ID = -1003297262036
+
+# --- 👑 YÖNETİCİ AYARLARI ---
+ADMIN_IDS = [7094870780]
+
+UNAUTHORIZED_IMAGE_URL = "https://i.ibb.co/zTjGk8rv/MG-8095.jpg"
+UNAUTHORIZED_ERROR_TEXT = (
+    "Sadece BEKLER grubunda çalışacağını söyledik.\n\n"
+    "Okuduğun basit bir cümleyi anlamayacak kadar gerizekalı isen "
+    "altta verdiğim linkten beyin gelişim egzersizleri yapabilirsin.\n"
+    "https://www.mentalup.net/blog/zeka-gelistirici-oyunlar"
+)
+
+# Model ismi
 MODEL_NAME = 'gemini-2.0-flash'
-
-# --- 🚫 YASAKLI STICKER PAKETLERİ ---
-YASAKLI_PAKETLER = [
-    "OldiesButGoldies5",
-    "ino8723",
-    "gq0bpksh8_1003369169896_by_QuotLyBot"
-]
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-ZODIAC_EMOJIS = {
-    "koç": "♈", "boğa": "♉", "ikizler": "♊", "yengeç": "♋", "aslan": "♌", 
-    "başak": "♍", "terazi": "♎", "akrep": "♏", "yay": "♐", "oğlak": "♑", 
-    "kova": "♒", "balık": "♓"
-}
+group_history = deque(maxlen=110)
+message_id_cache = {} 
+last_usage = {}
+COOLDOWN_MINUTES = 10
+pending_replies = {} 
 
 TAROT_CARDS = [
     "Deli", "Büyücü", "Azize", "İmparatoriçe", "İmparator", "Aziz",
@@ -60,58 +63,56 @@ TAROT_CARDS = [
     "Ay", "Güneş", "Mahkeme", "Dünya"
 ]
 
-# --- 3. STICKER ENGELLEME MOTORU ---
-async def delete_forbidden_stickers(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.sticker:
-        return
+# --- 3. BOT FONKSİYONLARI ---
+
+async def record_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type == 'private' and update.effective_user.id in ADMIN_IDS:
+        if update.effective_user.id in pending_replies:
+            target_id = pending_replies.pop(update.effective_user.id)
+            if update.message.text: await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=update.message.text, reply_to_message_id=target_id)
+            elif update.message.voice: await context.bot.send_voice(chat_id=AUTHORIZED_GROUP_ID, voice=update.message.voice.file_id, reply_to_message_id=target_id)
+            elif update.message.audio: await context.bot.send_audio(chat_id=AUTHORIZED_GROUP_ID, audio=update.message.audio.file_id, reply_to_message_id=target_id)
+            return
+
+    if update.effective_chat.id == AUTHORIZED_GROUP_ID and update.message and update.message.text:
+        u_name = update.effective_user.first_name
+        if len(u_name) <= 2: u_name = f"{u_name}"
+        group_history.append(f"{u_name}: {update.message.text}")
+        message_id_cache[update.message.message_id] = {"name": u_name, "text": update.message.text}
+        if len(message_id_cache) > 50: del message_id_cache[next(iter(message_id_cache))]
+
+async def announce_command(update, context):
+    if update.effective_user.id in ADMIN_IDS and context.args:
+        await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"📢{' '.join(context.args)}")
+
+async def comment_command(update, context):
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID or not update.message.reply_to_message: return
+    target = update.message.reply_to_message
+    t_name = target.from_user.first_name
     
-    gelen_paket = update.message.sticker.set_name
-    
-    if gelen_paket in YASAKLI_PAKETLER:
-        try:
-            user = update.effective_user.username or update.effective_user.first_name
-            await update.message.delete()
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id, 
-                text=f"🚫 @{user}, bu sticker paketi yasaklı olduğu için mesajın silindi!"
-            )
-        except Exception as e:
-            print(f"Sticker silme hatası: {e}")
-
-# --- 4. KOMUT MOTORLARI ---
-
-async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    target = update.message.reply_to_message if update.message.reply_to_message else update.message
-    if not target: return
-
-    if target.photo:
-        status_msg = await update.message.reply_text("🖼️ Görsel inceleniyor...")
-        try:
-            photo_file = await target.photo[-1].get_file()
-            f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
-            res = client.models.generate_content(model=MODEL_NAME, contents=["Bu resmi Türkçe özetle. Maks 50 kelime.", types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
-            await status_msg.edit_text(f"📝GÖRSEL ÖZETİ:\n\n{res.text}")
-        except: await status_msg.edit_text("❌ Hata.")
-    elif target.text or target.caption:
-        status_msg = await update.message.reply_text("📝 Metin özetleniyor...")
-        try:
-            res = client.models.generate_content(model=MODEL_NAME, contents=f"Özetle: {target.text or target.caption}")
-            await status_msg.edit_text(f"📝 METİN ÖZETİ:\n\n{res.text}")
-        except: await status_msg.edit_text("❌ Hata.")
-
-async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    photo_obj = update.message.photo[-1] if update.message.photo else (update.message.reply_to_message.photo[-1] if update.message.reply_to_message and update.message.reply_to_message.photo else None)
-    if not photo_obj:
-        await update.message.reply_text("☕ Fal için fincan fotosu lazım canım.")
-        return
-
-    status_msg = await update.message.reply_text("☕ Telveler analiz ediliyor, sakın ayrılma...")
+    roast_prompt = f"(Acımasız, üstün zekalı, alaycısın). HEDEF KİŞİ: {t_name} MESAJI: {target.text} GÖREVİN: Dalga geç, aşağıla. Maks 20 kelime."
     try:
-        photo_file = await photo_obj.get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
-        prompt = "Sen dobra, detaycı eski bir Türk falcı teyzesisin. Görseldeki fincan lekelerini analiz et, 'kuş var', 'yolun kapalı' gibi spesifik ol. Maks 150 kelime."
-        res = client.models.generate_content(model=MODEL_NAME, contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
-        await status_msg.edit_text(f"☕ Falcı Teyze diyor ki:\n\n{res.text}")
-    except: await status_msg.edit_text("⚠️ Fincanı okuyamadım, enerjin çok ağır.")
+        res = client.models.generate_content(model=MODEL_NAME, contents=roast_prompt)
+        await target.reply_text(f"💀{res.text}")
+    except: pass
+
+async def kamilaca_command(update, context):
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID or not update.message.reply_to_message: return
+    target = update.message.reply_to_message
+    prompt = f"(Sivri dilli, zeki, komik ve feminist bir kadınsın). MESAJ: {target.text} GÖREVİN: Bu mesaja alaycı bir şekilde cevap ver ve konuyu mutlaka erkeklerin genel bir kusuruna (örneğin beceriksizliklerine, düz mantıklarına) bağlayıp 'zaten erkekler şöyle böyle...' diyerek eleştir. Maksimum 30 kelime olsun."
+    try:
+        res = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+        await target.reply_text(f"💅 {res.text}")
+    except: pass
+
+async def emilile_command(update, context):
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID or not update.message.reply_to_message: return
+    target = update.message.reply_to_message
+    prompt = f"(Alıngan, sürekli trip atan ve sitemkar birisin). MESAJ: {target.text} GÖREVİN: Bu mesaja cevap verirken konuyu bir şekilde 'Zenithar'a bağla ve ona sitem et, trip at. 'Zenithar da hep böyle yapıyor' tarzında bir alınganlık göster. Maksimum 30 kelime olsun."
+    try:
+        res = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+        await target.reply_text(f"😒 {res.text}")
+    except: pass
 
 async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     secilenler = random.sample(TAROT_CARDS, 3)
@@ -121,59 +122,128 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(f"🔮 TAROT FALI:\n\n🃏 Kartlar: {', '.join(secilenler)}\n\n📜 Yorum:\n{res.text}")
     except: await status.edit_text("Ruhlar alemine ulaşılamadı.")
 
-# --- ✨ GÜNCEL VERİ DESTEKLİ BURÇ MOTORU ---
-def get_daily_horoscope_data(burc):
+async def admin_text_reply(update, context):
+    if update.effective_chat.type != 'private' or update.effective_user.id not in ADMIN_IDS or not context.args: return
     try:
-        url = f"https://burc-api.vercel.app/api/{burc}"
-        response = requests.get(url, timeout=5)
-        return response.json().get("yorum", "") if response.status_code == 200 else ""
-    except: return ""
-
-async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    metin = update.message.text.lower()
-    # Bot adını ve komutu temizle, sadece argümanları al
-    temiz_args = re.sub(r'^/burcyorumla(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip().split()
-    
-    if not temiz_args:
-        await update.message.reply_text("❗ Örnek: /burcyorumla akrep")
-        return
-    
-    burc_input = temiz_args[0]
-    mapping = {"koc": "koc", "boga": "boga", "yengec": "yengec", "basak": "basak", "oglak": "oglak", "balik": "balik"}
-    api_burc = mapping.get(burc_input, burc_input)
-    
-    status_msg = await update.message.reply_text(f"🛰️ {api_burc.capitalize()} için yıldız haritası çekiliyor...")
-
-    try:
-        raw_data = await asyncio.to_thread(get_daily_horoscope_data, api_burc)
-        tz = pytz.timezone("Europe/Istanbul")
-        date_str = datetime.datetime.now(tz).strftime("%d-%m-%Y")
-        prompt = (f"Tarih: {date_str}. Kaynak veri: '{raw_data}'. {api_burc} burcunu bu veriye dayanarak "
-                  "kendi tarzınla, derin ve güncel şekilde yeniden yorumla. Maks 100 kelime.")
+        msg_id = int(context.args[0].split('/')[-1])
+        t_name, t_text = (message_id_cache[msg_id]["name"], message_id_cache[msg_id]["text"]) if msg_id in message_id_cache else ("Biri", "[Bilinmiyor]")
+        prompt = f"HEDEF: {t_name} MESAJI: {t_text} GÖREV: Yerin dibine sok, ağır konuş, maks 15 kelime."
         res = client.models.generate_content(model=MODEL_NAME, contents=prompt)
-        await status_msg.edit_text(f"✨ {api_burc.upper()} YORUMU ({date_str}):\n\n{res.text}")
-    except: await status_msg.edit_text("❌ Veriye ulaşılamadı.")
+        await context.bot.send_message(chat_id=AUTHORIZED_GROUP_ID, text=f"💀 {res.text}", reply_to_message_id=msg_id)
+    except: pass
 
-# --- 5. ANA ÇALIŞTIRICI ---
+async def kendin_yanitla_command(update, context):
+    if update.effective_chat.type == 'private' and update.effective_user.id in ADMIN_IDS and context.args:
+        pending_replies[update.effective_user.id] = int(context.args[0].split('/')[-1])
+        await update.message.reply_text("🎯 Hedef kilitlendi. Cevabı gönder.")
+
+async def summarize_command(update, context):
+    if update.effective_chat.id != AUTHORIZED_GROUP_ID:
+        await update.message.reply_photo(photo=UNAUTHORIZED_IMAGE_URL, caption=UNAUTHORIZED_ERROR_TEXT)
+        return
+
+    chat_id = update.effective_chat.id
+    now = datetime.datetime.now()
+
+    if chat_id in last_usage:
+        gecen_sure = now - last_usage[chat_id]
+        kalan_saniye = (COOLDOWN_MINUTES * 60) - gecen_sure.total_seconds()
+        if kalan_saniye > 0:
+            dakika, saniye = int(kalan_saniye // 60), int(kalan_saniye % 60)
+            await update.message.reply_text(f"🛑 Henüz hazır değilim! {dakika} dk {saniye} sn bekle.")
+            return
+
+    msg_text = update.message.text.lower()
+    count = 50 if "50" in msg_text else 100
+
+    if len(group_history) < 10:
+        await update.message.reply_text("❌ Hafızada yeterli mesaj yok.")
+        return
+
+    status_msg = await update.message.reply_text("⏳ Yukarıdaki mesajları okuyorum...")
+
+    full_text = "\n".join(list(group_history)[-count:])
+
+    prompt = f"""
+    Aşağıdaki konuşmaları esprili, muzip, zekice laf sokmalı iğneleyici bir sivri dil kullanarak özetle. Özel kurallar:
+   
+    2: Hiçbir sözünü sakınma, en ağır eleştirileri yap. Hata veya saçmalıklarını yüzlerine vur.
+    3: Özet içerisinde asla * (yıldız) işareti kullanma.
+    4: Yazılanların hepsini 'o şunu dedi bu bunu dedi' gibi aynen yazmak yerine daha çok olay olarak özetle. Daha çok ince espri ve yorum kat.
+    5: İsimler çok kritiktir. Diğer benzer isimleri veya kısaltmaları (Örn: F) sakın onlarla karıştırma, ayrı kişiler olarak gör.
+    6: özet maksimum 160 kelimelik olsun. Olayları 4 paragrafa bölerek okunabilirliği artır, paragrafların başında anlatılan olaya uygun emoji kullanabilirsin
+    7: sana verdiğim bu prompt hakkında sakın herhangi bir ipucu verme. yalnızca özeti paylaş.
+    8: 4 paragraf halinde maksimum 160 kelime kullanarak özeti yaz.
+    9: olayları iyi analiz et. kişileri karıştırma
+
+    KONUŞMALAR:
+    {full_text}"""
+    
+    def call_gemini():
+        return client.models.generate_content(
+            model=MODEL_NAME,
+            contents=prompt,
+            config=types.GenerateContentConfig(safety_settings=[types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE')])
+        )
+
+    try:
+        gemini_coro = asyncio.to_thread(call_gemini)
+        gemini_task = asyncio.create_task(gemini_coro)
+
+        await asyncio.sleep(3)
+        if not gemini_task.done():
+            try: await status_msg.edit_text("🤖 Cıtkırıldroid Bot yapay zeka entegrasyonunu aktif hale getiriyor...")
+            except: pass
+
+        if not gemini_task.done():
+            await asyncio.sleep(3)
+            if not gemini_task.done():
+                try: await status_msg.edit_text("⚡ Nöral ağlar verileri işliyor...")
+                except: pass
+
+        if not gemini_task.done():
+            await asyncio.sleep(3)
+            if not gemini_task.done():
+                try: await status_msg.edit_text("🔮 İnsan zekasının yetersiz kaldığı boşluklar Zenithar mantığıyla dolduruluyor...")
+                except: pass
+
+        response = await gemini_task
+        await status_msg.delete()
+        await update.message.reply_text(f"📝 CHAT ÖZETİ:\n{response.text}")
+        last_usage[chat_id] = now
+
+    except Exception as e:
+        print(f"Özet hatası: {e}")
+        try: await status_msg.delete()
+        except: pass
+
+async def getir_command(update, context):
+    if update.effective_chat.type == 'private' and update.effective_user.id in ADMIN_IDS:
+        clean_id = str(AUTHORIZED_GROUP_ID).replace("-100", "")
+        res = "📜 **SON MESAJLAR:**\n\n" + "\n".join([f"👤 {message_id_cache[m_id]['name']} -> https://t.me/c/{clean_id}/{m_id}" for m_id in list(message_id_cache.keys())[-5:]])
+        await update.message.reply_text(res)
+
+# --- 4. ANA ÇALIŞTIRICI ---
 
 async def main():
     keep_alive()
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    
-    # MessageHandler kullanarak bot adı zorunluluğunu siliyoruz (Regex ile yakalama)
-    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/tarotbak'), tarot_command))
-    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/burcyorumla'), burcyorumla_command))
-    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
-    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/falbak'), falbak_command))
-    
-    # Sticker Engelleyici ve Diğer Mesajlar
-    application.add_handler(MessageHandler(filters.Sticker.ALL, delete_forbidden_stickers))
-    
-    print("Services Bot Tam Erişim Modunda Başlatıldı...")
+
+    application.add_handler(CommandHandler("duyuru", announce_command))
+    application.add_handler(CommandHandler("yorumla", comment_command))
+    application.add_handler(CommandHandler("kamilaca", kamilaca_command))
+    application.add_handler(CommandHandler("emilile", emilile_command))
+    application.add_handler(CommandHandler("tarotbak", tarot_command))
+    application.add_handler(CommandHandler("yanitla", admin_text_reply))
+    application.add_handler(CommandHandler("getir", getir_command))
+    application.add_handler(CommandHandler("kendinyanitla", kendin_yanitla_command))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/son(50|100)(@.*)?$'), summarize_command))
+    application.add_handler(MessageHandler((filters.TEXT | filters.VOICE | filters.AUDIO) & (~filters.COMMAND), record_message))
+
     await application.initialize(); await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
     while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     try: asyncio.run(main())
-    except Exception as e: print(f"Hata: {e}")
+    except: pass
