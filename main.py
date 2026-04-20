@@ -18,7 +18,7 @@ flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
-    return "Zenithar Services Aktif! (Bekleme Efektli & Karakter Düzeltilmiş)"
+    return "Zenithar Services Aktif! (Güncel Hafıza Sistemi)"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -29,7 +29,7 @@ def keep_alive():
     t.daemon = True
     t.start()
 
-# --- 2. AYARLAR ---
+# --- 2. AYARLAR VE GLOBAL HAFIZA ---
 nest_asyncio.apply()
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
@@ -38,7 +38,10 @@ MODEL_NAME = 'gemini-2.0-flash'
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-# Burç kontrolü için temiz liste (karşılaştırma buradaki "temiz" halleriyle yapılacak)
+# Hafıza Değişkenleri
+HOROSCOPE_CACHE = {}  # Burç yorumları burada tutulacak
+LAST_UPDATE_DATE = "" # "DD-MM-YYYY" formatında son güncelleme tarihi
+
 VALID_ZODIACS = [
     "koc", "boga", "ikizler", "yengec", "aslan", "basak", 
     "terazi", "akrep", "yay", "oglak", "kova", "balik"
@@ -60,76 +63,109 @@ def turkce_karakter_duzelt(metin):
         metin = metin.replace(kaynak, hedef)
     return metin
 
-# --- 4. KOMUT MOTORLARI ---
+# --- 4. GÜNCELLEME MOTORU ---
 
-# ✨ GÜNCEL VERİ VE BEKLEME EFEKTLİ BURÇ MOTORU
+async def update_daily_horoscopes():
+    """Tüm burçları internetten tarar ve hafızayı yeniler."""
+    global HOROSCOPE_CACHE, LAST_UPDATE_DATE
+    tz = pytz.timezone("Europe/Istanbul")
+    bugun = datetime.datetime.now(tz).strftime("%d-%m-%Y")
+    
+    print(f"🔄 Zenithar için {bugun} verileri internetten toplanıyor...")
+    
+    for burc in VALID_ZODIACS:
+        try:
+            # Google Search kullanarak her burç için taze veri çekiyoruz
+            prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
+                      f"Bu gelişmelere dayanarak Zenithar tarzında, derin ve etkileyici bir Türkçe yorum yap. "
+                      f"Maksimum 100 kelime.")
+            
+            res = client.models.generate_content(
+                model=MODEL_NAME, 
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearchRetrieval())]
+                )
+            )
+            HOROSCOPE_CACHE[burc] = res.text
+            # API'yi yormamak için burçlar arası çok kısa bekleme
+            await asyncio.sleep(1) 
+        except Exception as e:
+            print(f"Hata ({burc}): {e}")
+            HOROSCOPE_CACHE[burc] = "Yıldızlar şu an bu burç için sessiz kalıyor, daha sonra tekrar dene."
+
+    LAST_UPDATE_DATE = bugun
+    print("✅ Günlük hafıza başarıyla güncellendi.")
+
+# --- 5. KOMUT MOTORLARI ---
+
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    global LAST_UPDATE_DATE
     metin = update.message.text.lower()
     temiz_args = re.sub(r'^/burcyorumla(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip()
     
     if not temiz_args:
-        await update.message.reply_text("❗ Bir burç yazmalısın. Örnek: /burcyorumla akrep")
+        await update.message.reply_text("❗ Bir burç ismi yazmalısın. Örnek: /burcyorumla akrep")
         return
 
-    # Girişi "temiz" hale getiriyoruz (başak -> basak olur)
+    # Başak/Basak düzeltmesi
     burc_input = turkce_karakter_duzelt(temiz_args)
     
-    # Kontrolü "temiz" liste üzerinden yapıyoruz
     if burc_input not in VALID_ZODIACS:
         await update.message.reply_text("Mal mısın? Burç ismini doğru yaz.")
         return
-    
-    # --- Senkron Bekletme Aşamaları ---
-    status_msg = await update.message.reply_text("🛰️ Yıldız haritaları taranıyor...(çok önemli bu bak)")
-    await asyncio.sleep(3)
-    
-    await status_msg.edit_text("🔭 Gezegen konumları analiz ediliyor... :P ")
-    await asyncio.sleep(3)
-    
-    await status_msg.edit_text("📜 Cıtkırıldroid Bot senin için yorumu hazırlıyor...")
 
-    try:
-        tz = pytz.timezone("Europe/Istanbul")
-        bugun = datetime.datetime.now(tz).strftime("%d %B %Y")
-        
-        prompt = (f"Bugünün tarihi: {bugun}. İnternetten {burc_input} burcu için bugünkü gerçek astrolojik yorumları, "
-                  f"gezegen konumlarını araştır. Bu bilgileri sentezleyerek "
-                  f"bilge, hafif gizemli ve etkileyici bir dille Türkçe yorumla. "
-                  f"Maks 120 kelime olsun.")
-        
-        res = client.models.generate_content(
-            model=MODEL_NAME, 
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearchRetrieval())]
-            )
-        )
-        await status_msg.edit_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{res.text}")
-    except Exception as e:
-        print(f"Hata: {e}")
-        await status_msg.edit_text("❌ Yıldızlara ulaşırken bir sorun oluştu, sonra tekrar dene.")
+    tz = pytz.timezone("Europe/Istanbul")
+    bugun = datetime.datetime.now(tz).strftime("%d-%m-%Y")
 
-# ☕ KAHVE FALI
+    # --- DURUM 1: HAFIZA ESKİ VEYA YOK ---
+    if LAST_UPDATE_DATE != bugun or burc_input not in HOROSCOPE_CACHE:
+        status_msg = await update.message.reply_text("🛰️ Yıldız haritaları taranıyor...")
+        await asyncio.sleep(3)
+        
+        await status_msg.edit_text("🔭 Gezegen konumları analiz ediliyor...")
+        # Bu aşamada arka planda güncellemeyi başlatıyoruz
+        await update_daily_horoscopes()
+        await asyncio.sleep(3)
+        
+        await status_msg.edit_text("📜 Cıtkırıldroid senin için yorumu hazırlıyor...")
+        await asyncio.sleep(1)
+        
+        yorum = HOROSCOPE_CACHE.get(burc_input)
+        await status_msg.edit_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
+    
+    # --- DURUM 2: HAFIZA ZATEN GÜNCEL ---
+    else:
+        # Hafıza güncel olsa bile istediğin o "bekleme" havasını veriyoruz
+        status_msg = await update.message.reply_text("🛰️ Yıldız haritaları taranıyor...")
+        await asyncio.sleep(2)
+        await status_msg.edit_text("📜 Zenithar senin için yorumu hazırlıyor...")
+        await asyncio.sleep(1)
+        
+        yorum = HOROSCOPE_CACHE.get(burc_input)
+        await status_msg.edit_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
+
+# ☕ GELİŞMİŞ KAHVE FALI
 async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo_obj = update.message.photo[-1] if update.message.photo else (update.message.reply_to_message.photo[-1] if update.message.reply_to_message and update.message.reply_to_message.photo else None)
     if not photo_obj:
         await update.message.reply_text("☕ Fal için fincan fotosu lazım canım.")
         return
 
-    status_msg = await update.message.reply_text("☕ Telvelerin dili çözülüyor...")
+    status_msg = await update.message.reply_text("☕ Telveler analiz ediliyor, sakın ayrılma...")
     try:
         photo_file = await photo_obj.get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
-        prompt = ("Görseldeki kahve lekelerini somut nesnelere benzeterek (at, kuş, anahtar vb.) yorumla. "
-                  "Klişe sözler kullanma. Dobra ve mistik ol.")
+        # Fal yorumunda klişeleri yasaklayıp görsel detay istiyoruz
+        prompt = ("Görseldeki kahve lekelerini incele. Lekeleri somut nesnelere benzet (örneğin: şahlanmış at, kedi silüeti, anahtar). "
+                  "Klişe sözler kullanma. Zenithar Falcı Teyze olarak dobra ve mistik bir dille yorumla.")
         res = client.models.generate_content(model=MODEL_NAME, contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
-        await status_msg.edit_text(f"☕ Zenithar Falcı Teyze:\n\n{res.text}")
-    except: await status_msg.edit_text("⚠️ Fincanı okuyamadım.")
+        await status_msg.edit_text(f"☕ Zenithar Falcı Teyze Diyor Ki:\n\n{res.text}")
+    except: await status_msg.edit_text("⚠️ Enerjin çok ağır, fincanı okuyamadım.")
 
 # 📝 ÖZETLEME
 async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     target = update.message.reply_to_message if update.message.reply_to_message else update.message
     if not target: return
-    
     status_msg = await update.message.reply_text("🔄 İnceleniyor...")
     try:
         if target.photo:
@@ -145,22 +181,23 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
     try:
-        res = client.models.generate_content(model=MODEL_NAME, contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği 3 paragrafta yorumla.")
-        await status.edit_text(f"🔮 TAROT:\n{res.text}")
+        res = client.models.generate_content(model=MODEL_NAME, contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla.")
+        await status.edit_text(f"🔮 TAROT FALI:\n\n{res.text}")
     except: await status.edit_text("❌ Bağlantı koptu.")
 
-# --- 5. ANA ÇALIŞTIRICI ---
+# --- 6. ANA ÇALIŞTIRICI ---
 
 async def main():
     keep_alive()
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
+    # Komut Kayıtları
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/tarotbak'), tarot_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/burcyorumla'), burcyorumla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/falbak'), falbak_command))
     
-    print("Zenithar Services Bot Başlatıldı...")
+    print("Zenithar Services (Güncel Hafıza Modu) Başlatıldı...")
     await application.initialize(); await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
     while True: await asyncio.sleep(3600)
