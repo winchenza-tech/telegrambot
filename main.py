@@ -86,9 +86,11 @@ async def update_daily_horoscopes():
     for burc in VALID_ZODIACS:
         try:
             prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
-                      f" Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 135 kelime kullan. Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz")
+                      f"Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 135 kelime kullan. "
+                      f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz.")
             
-            res = client.models.generate_content(
+            # DÜZELTME: client.aio (Asenkron) eklendi
+            res = await client.aio.models.generate_content(
                 model=MODEL_NAME, 
                 contents=prompt,
                 config=types.GenerateContentConfig(
@@ -96,7 +98,7 @@ async def update_daily_horoscopes():
                 )
             )
             HOROSCOPE_CACHE[burc] = res.text
-            await asyncio.sleep(1.5) # API limitlerini korumak için
+            await asyncio.sleep(3) # API limitlerini korumak için 3 saniyeye çıkarıldı
         except Exception as e:
             print(f"Hata ({burc}): {e}")
             HOROSCOPE_CACHE[burc] = "Yıldızlar şu an bu burç için sessiz kalıyor, enerjini toplayıp sonra gel."
@@ -179,7 +181,8 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         photo_file = await photo_obj.get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
         prompt = "Görseldeki kahve lekelerini somut nesnelere benzeterek dobra ve mistik bir dille yorumla. Klişelerden kaçın."
-        res = client.models.generate_content(model=MODEL_NAME, contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
+        # DÜZELTME: client.aio (Asenkron) eklendi
+        res = await client.aio.models.generate_content(model=MODEL_NAME, contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
         await status_msg.edit_text(f"☕ Zenithar Falcı Teyze:\n\n{res.text}")
     except: await status_msg.edit_text("⚠️ Fincanı okuyamadım.")
 
@@ -191,9 +194,11 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if target.photo:
             photo_file = await target.photo[-1].get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
-            res = client.models.generate_content(model=MODEL_NAME, contents=["Bu resmi Türkçe özetle.", types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
+            # DÜZELTME: client.aio (Asenkron) eklendi
+            res = await client.aio.models.generate_content(model=MODEL_NAME, contents=["Bu resmi Türkçe özetle.", types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
         else:
-            res = client.models.generate_content(model=MODEL_NAME, contents=f"Özetle: {target.text or target.caption}")
+            # DÜZELTME: client.aio (Asenkron) eklendi
+            res = await client.aio.models.generate_content(model=MODEL_NAME, contents=f"Özetle: {target.text or target.caption}")
         await status_msg.edit_text(f"📝 ÖZET:\n\n{res.text}")
     except: await status_msg.edit_text("❌ Hata.")
 
@@ -203,7 +208,8 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
     try:
-        res = client.models.generate_content(model=MODEL_NAME, contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla.")
+        # DÜZELTME: client.aio (Asenkron) eklendi
+        res = await client.aio.models.generate_content(model=MODEL_NAME, contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla.")
         await status.edit_text(f"🔮 TAROT FALI:\n\n{res.text}")
     except: await status.edit_text("❌ Bağlantı koptu.")
 
@@ -215,9 +221,7 @@ async def main():
     
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
-    # Yeni /update komutunu ekliyoruz
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/update'), update_command))
-    
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/tarotbak'), tarot_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/burcyorumla'), burcyorumla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
