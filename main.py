@@ -14,14 +14,15 @@ from google import genai
 from google.genai import types
 
 # --- 1. AYARLAR VE GLOBAL DEĞİŞKENLER ---
-UPDATE_HOUR = 1  
-ADMIN_ID = 7094870780  
+UPDATE_HOUR = 2  # Gece otomatik güncelleme saati (Türkiye saati ile 02:00)
+ADMIN_ID = 7094870780  # Admin ID (Sadece bu ID özelden yazabilir ve /update çalıştırabilir)
 
+# --- WEB SUNUCUSU (Uygulamayı 7/24 Ayakta Tutar) ---
 flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
-    return "Zenithar Services Aktif! (Güvenli Kilit & 1 Dk Hafıza Modu)"
+    return "Zenithar Services Aktif! (Manuel Başlangıç ve 02:00 Güncelleme Modu)"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -32,6 +33,7 @@ def keep_alive():
     t.daemon = True
     t.start()
 
+# --- BOT VE API AYARLARI ---
 nest_asyncio.apply()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
@@ -44,9 +46,10 @@ VALID_ZODIACS = [
     "koc", "boga", "ikizler", "yengec", "aslan", "basak", 
     "terazi", "akrep", "yay", "oglak", "kova", "balik"
 ]
+# Başlangıçta içi boş
 HOROSCOPE_CACHE = {burc: "" for burc in VALID_ZODIACS}
 
-# YENİ EKLENEN KİLİT: Aynı anda iki güncelleme çalışmasını engeller
+# Aynı anda birden fazla güncelleme çalışmasını engelleyen KİLİT
 IS_UPDATING = False 
 
 TAROT_CARDS = [
@@ -66,84 +69,99 @@ def turkce_karakter_duzelt(metin):
     return metin
 
 async def check_access(update: Update) -> bool:
+    """Özel sohbetlerde sadece Admin'e izin verir, yoksa gruba yönlendirir."""
     if update.message and update.message.chat.type == 'private':
         if update.effective_user.id != ADMIN_ID:
             await update.message.reply_text("Yalnızca Es Justo grubunda çalışır iletişim icin @eskidenyesil")
             return False
     return True
 
-# --- 3. GÜNCELLEME MOTORU (Kilit Korumalı) ---
+# --- 3. GARANTİLİ GÜNCELLEME MOTORU (Başarana Kadar Dener) ---
 
 async def update_all_horoscopes():
     global IS_UPDATING
     
-    # KİLİT KONTROLÜ: Zaten çalışıyorsa ikinciyi başlatma!
     if IS_UPDATING:
         print("⚠️ Uyarı: Güncelleme zaten arka planda devam ediyor. Çakışma önlendi.")
         return
         
-    IS_UPDATING = True # Kapıyı kilitle
-    
+    IS_UPDATING = True 
     tz = pytz.timezone("Europe/Istanbul")
     bugun = datetime.datetime.now(tz).strftime("%d-%m-%Y")
-    print(f"🔄 {bugun} için TOPLU GÜNCELLEME BAŞLADI. 12 dakika sürecek...")
+    print(f"🔄 {bugun} için GARANTİLİ TOPLU GÜNCELLEME BAŞLADI...")
     
     try:
         for burc in VALID_ZODIACS:
-            try:
-                print(f"📡 {burc.upper()} internetten çekiliyor...")
-                prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
-                          f" Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 135 kelime kullan. "
-                          f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz")
-                
-                # UYARI DÜZELTİLDİ: types.GoogleSearch() olarak güncellendi.
-                res = await client.aio.models.generate_content(
-                    model=MODEL_NAME, 
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        tools=[types.Tool(google_search=types.GoogleSearch())]
+            success = False
+            retry_count = 0
+            
+            # Başarana kadar bu döngüden çıkmaz (Limit hatasında 90sn bekler tekrar dener)
+            while not success:
+                try:
+                    print(f"📡 {burc.upper()} internetten çekiliyor (Deneme: {retry_count + 1})...")
+                    prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
+                              f"Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 135 kelime kullan. "
+                              f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz")
+                    
+                    res = await client.aio.models.generate_content(
+                        model=MODEL_NAME, 
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            tools=[types.Tool(google_search=types.GoogleSearch())]
+                        )
                     )
-                )
-                HOROSCOPE_CACHE[burc] = res.text
-                print(f"✅ {burc.upper()} hafızaya alındı. 60 saniye bekleniyor...")
+                    
+                    HOROSCOPE_CACHE[burc] = res.text
+                    print(f"✅ {burc.upper()} başarıyla hafızaya alındı.")
+                    success = True # Başarılı oldu, döngüden çıkabilir
+                    
+                except Exception as e:
+                    retry_count += 1
+                    print(f"❌ Hata ({burc}): {e}. Google'ı dinlendirmek için 90 saniye bekleniyor...")
+                    if HOROSCOPE_CACHE[burc] == "":
+                        HOROSCOPE_CACHE[burc] = "Şu anda tüm astrologlar yıldızlara bakarak sigara içiyor 5 dakika sonra tekrar dene."
+                    await asyncio.sleep(90) # Hata alınca zorunlu bekleme
+            
+            # Burç başarıyla alındıktan sonra diğer burca geçmeden Google'ı dinlendir
+            if burc != VALID_ZODIACS[-1]: # Son burç değilse bekle
+                print(f"⏳ {burc.upper()} tamamlandı. Diğer burca geçmeden önce 90 saniye dinlenme...")
+                await asyncio.sleep(90) 
                 
-                await asyncio.sleep(60) 
-                
-            except Exception as e:
-                print(f"❌ Hata ({burc}): {e}")
-                HOROSCOPE_CACHE[burc] = "Yıldızlar şu an bu burç için sessiz kalıyor, daha sonra tekrar güncellenecek."
-                await asyncio.sleep(60) # Hata alsa bile Google'ı dinlendirmek için 1 dk bekle
-                
-        print("✅ TÜM BURÇLAR HAFIZAYA BAŞARIYLA KAYDEDİLDİ!")
+        print("✅ TÜM BURÇLAR (12/12) HAFIZAYA BAŞARIYLA KAYDEDİLDİ!")
     finally:
-        IS_UPDATING = False # İşlem bitince kapının kilidini aç
+        IS_UPDATING = False # İşlem bitti, kilidi aç
 
 async def background_scheduler():
-    # Bot ilk açıldığında otomatik doldur (Kilit devreye girer)
-    await update_all_horoscopes()
-
+    """Bot ilk açıldığında BEKLER. Sadece gece 02:00'de otomatik tetiklenir."""
+    print("🚀 Sistem başlatıldı. İlk hafıza dolumu için Admin'den /update komutu bekleniyor veya gece 02:00 bekleniyor...")
+    
+    # İLK AÇILIŞ GÜNCELLEMESİ KALDIRILDI! Sadece döngü çalışacak.
+    
     while True:
         tz = pytz.timezone("Europe/Istanbul")
         now = datetime.datetime.now(tz)
         
+        # Gece 02:00 otomatik güncelleme
         if now.hour == UPDATE_HOUR and now.minute == 0:
             await update_all_horoscopes()
-            await asyncio.sleep(60)
+            await asyncio.sleep(60) # Aynı dakikada 2. kez tetiklenmeyi önler
             
         await asyncio.sleep(30)
 
 # --- 4. KOMUT MOTORLARI ---
 
+# 👑 ADMİN ÖZEL KOMUT
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global IS_UPDATING
     if update.effective_user.id != ADMIN_ID: return 
     
     if IS_UPDATING:
-        await update.message.reply_text("⚠️ Zenithar şu anda zaten bir güncelleme yapıyor. Lütfen bitmesini bekle.")
+        await update.message.reply_text(" Bot şu anda zaten bir güncelleme yapıyor. Lütfen bitmesini bekle.")
     else:
-        await update.message.reply_text("🔄 Manuel toplu güncelleme başlatıldı.\nHer burç arası 1 dakika bekleniyor.\nİşlem yaklaşık 12 dakika sürecektir.")
+        await update.message.reply_text("🔄 Manuel toplu güncelleme başlatıldı.\nHer burç arası 90 saniye bekleniyor.\nİşlem yaklaşık 18 dakika sürecektir.")
         asyncio.create_task(update_all_horoscopes())
 
+# ✨ BURÇ KOMUTU
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     
@@ -164,19 +182,22 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     yorum = HOROSCOPE_CACHE.get(burc_input)
 
+    # Eğer bot yeni açılmışsa ve admin henüz /update yapmamışsa
     if yorum == "":
-        await update.message.reply_text("🛰️ Zenithar hafızasını güncelliyor. Yıldızlar henüz uyanmadı, yaklaşık 10 dakika sonra tekrar sor.")
+        await update.message.reply_text("🛰️ Yıldızlar henüz uyanmadı. Lütfen yönetici güncellemeyi başlatana kadar veya gece güncellemesi yapılana kadar bekle.")
     else:
+        # Hafızadan anında cevap
         await update.message.reply_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
 
-# --- (Diğer komutlar: Fal, Özet, Tarot aynen korundu) ---
-
+# ☕ KAHVE FALI KOMUTU
 async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
+    
     photo_obj = update.message.photo[-1] if update.message.photo else (update.message.reply_to_message.photo[-1] if update.message.reply_to_message and update.message.reply_to_message.photo else None)
     if not photo_obj:
         await update.message.reply_text("☕ Fal için fincan fotosu lazım canım.")
         return
+        
     status_msg = await update.message.reply_text("☕ Telveler analiz ediliyor...")
     try:
         photo_file = await photo_obj.get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
@@ -185,8 +206,10 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"☕ Zenithar Falcı Teyze:\n\n{res.text}")
     except: await status_msg.edit_text("⚠️ Fincanı okuyamadım.")
 
+# 📝 ÖZETLE KOMUTU
 async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
+    
     target = update.message.reply_to_message if update.message.reply_to_message else update.message
     status_msg = await update.message.reply_text("🔄 İnceleniyor...")
     try:
@@ -198,8 +221,10 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"📝 ÖZET:\n\n{res.text}")
     except: await status_msg.edit_text("❌ Hata.")
 
+# 🃏 TAROT KOMUTU
 async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
+    
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
     try:
@@ -207,21 +232,29 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(f"🔮 TAROT FALI:\n\n{res.text}")
     except: await status.edit_text("❌ Bağlantı koptu.")
 
+# --- 5. ANA ÇALIŞTIRICI ---
+
 async def main():
     keep_alive()
+    
+    # Arka plan zamanlayıcısını başlatır
     asyncio.create_task(background_scheduler())
     
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
+    # Komut Yakalayıcılar
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/update'), update_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/tarotbak'), tarot_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/burcyorumla'), burcyorumla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/falbak'), falbak_command))
     
-    print(f"Zenithar Services Başlatıldı.")
+    print(f"Zenithar Services Başlatıldı. (Manuel Başlangıç ve 02:00 Oto-Güncelleme)")
+    
     await application.initialize(); await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
+    
+    # Uygulamayı sonsuz döngüde tut
     while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
