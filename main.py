@@ -21,7 +21,7 @@ flask_app = Flask(__name__)
 
 @flask_app.route('/')
 def home():
-    return f"Zenithar Services Aktif! Güvenlik & Zeki Hafıza Modu: Açık"
+    return "Zenithar Services Aktif! (Manuel & 1 Dakika Aralıklı Hafıza Modu)"
 
 def run_flask():
     port = int(os.environ.get("PORT", 8080))
@@ -39,13 +39,12 @@ MODEL_NAME = 'gemini-2.0-flash'
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-# YENİ HAFIZA YAPISI: Her burcun kendi metni ve kendi tarihi var
-HOROSCOPE_CACHE = {burc: {"text": "", "date": ""} for burc in [
+# HAFIZA SİSTEMİ
+VALID_ZODIACS = [
     "koc", "boga", "ikizler", "yengec", "aslan", "basak", 
     "terazi", "akrep", "yay", "oglak", "kova", "balik"
-]}
-
-VALID_ZODIACS = list(HOROSCOPE_CACHE.keys())
+]
+HOROSCOPE_CACHE = {burc: "" for burc in VALID_ZODIACS}
 
 TAROT_CARDS = [
     "Deli", "Büyücü", "Azize", "İmparatoriçe", "İmparator", "Aziz",
@@ -70,54 +69,55 @@ async def check_access(update: Update) -> bool:
             return False
     return True
 
-# --- 3. YENİ ZEKİ GÜNCELLEME MOTORU ---
+# --- 3. GÜNCELLEME MOTORU (Her Burç Arası 1 Dakika) ---
 
-async def fetch_single_horoscope(burc: str) -> str:
-    """Sadece TEK BİR burcu internetten arar ve hafızaya yazar."""
+async def update_all_horoscopes():
+    """Tüm burçları 1 dakika arayla çekip hafızaya doldurur. (~12-13 dk sürer)"""
     tz = pytz.timezone("Europe/Istanbul")
     bugun = datetime.datetime.now(tz).strftime("%d-%m-%Y")
     
-    try:
-        print(f"🔍 {burc.upper()} için internet taraması yapılıyor...")
-        prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
-                  f"Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 135 kelime kullan. "
-                  f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz.")
-        
-        res = await client.aio.models.generate_content(
-            model=MODEL_NAME, 
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                tools=[types.Tool(google_search=types.GoogleSearchRetrieval())]
-            )
-        )
-        # Sadece bu burcun hafızasını güncelle
-        HOROSCOPE_CACHE[burc]["text"] = res.text
-        HOROSCOPE_CACHE[burc]["date"] = bugun
-        return res.text
-    except Exception as e:
-        print(f"❌ Hata ({burc}): {e}")
-        return "Yıldızlar şu an bu burç için sessiz kalıyor, enerjini toplayıp sonra gel."
-
-async def slow_background_update():
-    """Tüm burçları yavaş yavaş (20 sn arayla) günceller. Google'dan ban yememek için."""
-    tz = pytz.timezone("Europe/Istanbul")
-    bugun = datetime.datetime.now(tz).strftime("%d-%m-%Y")
+    print(f"🔄 {bugun} için TOPLU GÜNCELLEME BAŞLADI. İşlem yaklaşık 12 dakika sürecek...")
     
-    print("🔄 Yavaş arka plan güncellemesi başlatıldı...")
     for burc in VALID_ZODIACS:
-        if HOROSCOPE_CACHE[burc]["date"] != bugun:
-            await fetch_single_horoscope(burc)
-            await asyncio.sleep(45) # 20 Saniye bekle!
-    print("✅ Tüm burçlar başarıyla güncellendi.")
+        try:
+            print(f"📡 {burc.upper()} internetten çekiliyor...")
+            # Senin yazdığın orijinal prompt:
+            prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
+                      f" Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 135 kelime kullan. "
+                      f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz")
+            
+            res = await client.aio.models.generate_content(
+                model=MODEL_NAME, 
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearchRetrieval())]
+                )
+            )
+            HOROSCOPE_CACHE[burc] = res.text
+            print(f"✅ {burc.upper()} hafızaya alındı. 60 saniye bekleniyor...")
+            
+            # İstediğin 1 dakikalık bekleme süresi:
+            await asyncio.sleep(60) 
+            
+        except Exception as e:
+            print(f"❌ Hata ({burc}): {e}")
+            HOROSCOPE_CACHE[burc] = "Yıldızlar şu an bu burç için sessiz kalıyor, daha sonra tekrar güncellenecek."
+
+    print("✅ TÜM BURÇLAR HAFIZAYA BAŞARIYLA KAYDEDİLDİ!")
 
 async def background_scheduler():
+    # Bot her başladığında hafızayı bir kez doldurur
+    await update_all_horoscopes()
+
     while True:
         tz = pytz.timezone("Europe/Istanbul")
         now = datetime.datetime.now(tz)
+        
+        # Gece 01:00 otomatik güncelleme
         if now.hour == UPDATE_HOUR and now.minute == 0:
-            # Gece 01:00 olduğunda yavaş güncellemeyi başlat
-            asyncio.create_task(slow_background_update())
-            await asyncio.sleep(60) # Aynı dakikada 2 kez tetiklenmesin diye 1 dk uyu
+            await update_all_horoscopes()
+            await asyncio.sleep(60)
+            
         await asyncio.sleep(30)
 
 # --- 4. KOMUT MOTORLARI ---
@@ -125,8 +125,8 @@ async def background_scheduler():
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != ADMIN_ID: return 
     
-    await update.message.reply_text("🔄 Arka planda yavaş güncelleme başlatıldı. Google API yorulmasın diye işlem yaklaşık 4 dakika sürecek. Bot bu sırada normal şekilde çalışmaya devam edebilir.")
-    asyncio.create_task(slow_background_update())
+    await update.message.reply_text("🔄 Manuel toplu güncelleme başlatıldı.\nHer burç arası 1 dakika bekleniyor.\nİşlem yaklaşık 12-13 dakika sürecektir.")
+    asyncio.create_task(update_all_horoscopes())
 
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
@@ -145,30 +145,16 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     tz = pytz.timezone("Europe/Istanbul")
     bugun = datetime.datetime.now(tz).strftime("%d-%m-%Y")
-
-    # KONTROL: Hafıza eski mi veya boş mu?
-    if HOROSCOPE_CACHE[burc_input]["date"] != bugun:
-        status_msg = await update.message.reply_text("🛰️ Yıldız haritaları taranıyor...")
-        await asyncio.sleep(1)
-        await status_msg.edit_text("🔭 İnternetten güncel veriler çekiliyor...")
-        
-        # SADECE İSTENEN BURCU İNTERNETTEN ÇEKER! Diğer 11 burcu beklemez.
-        yorum = await fetch_single_horoscope(burc_input)
-        
-        await status_msg.edit_text("📜 Cıtkırıldroid senin için yorumu hazırlıyor...")
-        await asyncio.sleep(1)
-        await status_msg.edit_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
     
-    else:
-        # Hafıza güncelse, hiç internete bağlanmadan direkt hafızadan verir.
-        status_msg = await update.message.reply_text("🛰️ Yıldız haritaları taranıyor...")
-        await asyncio.sleep(2)
-        await status_msg.edit_text("📜 Cıtkırıldroid senin için yorumu hazırlıyor...")
-        await asyncio.sleep(1)
-        yorum = HOROSCOPE_CACHE[burc_input]["text"]
-        await status_msg.edit_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
+    # Doğrudan hafızadan çekim
+    yorum = HOROSCOPE_CACHE.get(burc_input)
 
-# --- (Fal, Özet ve Tarot Komutları Aynı Kaldı) ---
+    if yorum == "":
+        await update.message.reply_text("🛰️ Zenithar hafızasını güncelliyor. Yıldızlar henüz uyanmadı, yaklaşık 10-15 dakika sonra tekrar sor.")
+    else:
+        await update.message.reply_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
+
+# --- (Diğer komutlar: Fal, Özet, Tarot aynen korundu) ---
 
 async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
@@ -206,8 +192,6 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(f"🔮 TAROT FALI:\n\n{res.text}")
     except: await status.edit_text("❌ Bağlantı koptu.")
 
-# --- 5. ANA ÇALIŞTIRICI ---
-
 async def main():
     keep_alive()
     asyncio.create_task(background_scheduler())
@@ -220,7 +204,7 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/falbak'), falbak_command))
     
-    print(f"Zenithar Services Başlatıldı (Güvenlik Korumalı).")
+    print(f"Zenithar Services Başlatıldı.")
     await application.initialize(); await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
     while True: await asyncio.sleep(3600)
