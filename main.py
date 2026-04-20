@@ -86,7 +86,7 @@ async def update_daily_horoscopes():
     for burc in VALID_ZODIACS:
         try:
             prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
-                      f"Zenithar persona'sı ile bilge ve mistik bir dille Türkçe yorumla. Maks 100 kelime.")
+                      f" Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 135 kelime kullan. Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz")
             
             res = client.models.generate_content(
                 model=MODEL_NAME, 
@@ -153,7 +153,7 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         await status_msg.edit_text("🔭 Gezegen konumları analiz ediliyor...")
         await update_daily_horoscopes()
         await asyncio.sleep(3)
-        await status_msg.edit_text("📜 Zenithar senin için yorumu hazırlıyor...")
+        await status_msg.edit_text("📜 Cıtkırıldroid senin için yorumu hazırlıyor...")
         await asyncio.sleep(1)
         
         yorum = HOROSCOPE_CACHE.get(burc_input)
@@ -162,7 +162,7 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     else:
         status_msg = await update.message.reply_text("🛰️ Yıldız haritaları taranıyor...")
         await asyncio.sleep(2)
-        await status_msg.edit_text("📜 Zenithar senin için yorumu hazırlıyor...")
+        await status_msg.edit_text("📜 Cıtkırıldroid senin için yorumu hazırlıyor...")
         await asyncio.sleep(1)
         
         yorum = HOROSCOPE_CACHE.get(burc_input)
