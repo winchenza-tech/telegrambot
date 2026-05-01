@@ -17,6 +17,7 @@ from google.genai import types
 # --- 1. AYARLAR VE GLOBAL DEĞİŞKENLER ---
 UPDATE_HOUR = 2  # Gece otomatik güncelleme saati (Türkiye saati ile 02:00)
 ADMIN_ID = 7094870780  # Admin ID (Sadece bu ID özelden yazabilir ve /update çalıştırabilir)
+ALLOWED_GROUPS = [-1003938704852, -1003297262036] # Sadece bu gruplarda çalışmasına izin verilir
 
 # --- WEB SUNUCUSU (Uygulamayı 7/24 Ayakta Tutar) ---
 flask_app = Flask(__name__)
@@ -72,12 +73,28 @@ def turkce_karakter_duzelt(metin):
     return metin
 
 async def check_access(update: Update) -> bool:
-    """Özel sohbetlerde sadece Admin'e izin verir, yoksa gruba yönlendirir."""
-    if update.message and update.message.chat.type == 'private':
-        if update.effective_user.id != ADMIN_ID:
-            await update.message.reply_text("Yalnızca Es Justo grubunda çalışır iletişim icin @eskidenyesil")
+    """Komutların içerisindeki erişim kontrolü - Yeni güvenlik mesajıyla güncellendi"""
+    if not update.effective_message: return False
+    
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    is_private = update.effective_chat.type == 'private'
+    
+    if is_private:
+        if user_id != ADMIN_ID:
+            await update.effective_message.reply_text("Bu botun yalnızca belirli gruplarda çalışmasına izin verdim. Sana yetki yok @eskidenyesil")
             return False
+    else:
+        if chat_id not in ALLOWED_GROUPS:
+            await update.effective_message.reply_text("Bu botun yalnızca belirli gruplarda çalışmasına izin verdim. Sana yetki yok @eskidenyesil")
+            return False
+            
     return True
+
+async def reject_unauthorized(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Yetkisiz erişimlerde devreye giren özel fırça mesajı"""
+    if not update.effective_message: return
+    await update.effective_message.reply_text("Bu botun yalnızca belirli gruplarda çalışmasına izin verdim. Sana yetki yok @eskidenyesil")
 
 # --- 3. GARANTİLİ GÜNCELLEME MOTORU (Başarana Kadar Dener) ---
 
@@ -103,8 +120,8 @@ async def update_all_horoscopes():
                 try:
                     print(f"📡 {burc.upper()} internetten çekiliyor (Deneme: {retry_count + 1})...")
                     prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
-                              f"Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 150 kelime kullan. Biraz samimi bir dil olsun biraz espri yapabilirsin yerine göre"
-                              f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz")
+                              f"Biraz alaycı samimi, bilge ve mistik bir dille Türkçe olarak yeniden yorumla. Maks 135 kelime kullan. "
+                              f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz. Biraz espri katabilirsin. 2 paragraf şeklinde yaz Asla yıldız (*) simgesi kullanma")
                     
                     res = await client.aio.models.generate_content(
                         model=MODEL_NAME, 
@@ -122,7 +139,7 @@ async def update_all_horoscopes():
                     retry_count += 1
                     print(f"❌ Hata ({burc}): {e}. Google'ı dinlendirmek için 90 saniye bekleniyor...")
                     if HOROSCOPE_CACHE[burc] == "":
-                        HOROSCOPE_CACHE[burc] = "Şu anda tüm astrologlar yıldızlara bakarak sigara içiyor 5 dakika sonra tekrar dene."
+                        HOROSCOPE_CACHE[burc] = "Şu anda tüm zenithar yıldızlara bakarak sigara içiyor 5 dakika sonra tekrar dene."
                     await asyncio.sleep(90) # Hata alınca zorunlu bekleme
             
             # Burç başarıyla alındıktan sonra diğer burca geçmeden Google'ı dinlendir
@@ -198,13 +215,13 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     photo_obj = update.message.photo[-1] if update.message.photo else (update.message.reply_to_message.photo[-1] if update.message.reply_to_message and update.message.reply_to_message.photo else None)
     if not photo_obj:
-        await update.message.reply_text("☕ Fal için fincan fotosu lazım canım.")
+        await update.message.reply_text("☕ Fal için fincan fotosu lazım. Neyim ben mahalle falcısı mı sandın?")
         return
         
     status_msg = await update.message.reply_text("☕ Telveler analiz ediliyor...")
     try:
         photo_file = await photo_obj.get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
-        prompt = "Görseldeki kahve lekelerini somut nesnelere benzeterek dobra ve mistik bir dille yorumla. Klişelerden kaçın."
+        prompt = "Görseldeki kahve lekelerini somut nesnelere benzeterek dobra ve mistik bir dille yorumla. Klişelerden kaçın. maksimum 150 kelime kullan ve asla yıldız(*) işareti kullanma "
         
         # Güvenlik filtresi eklendi (Hata vermemesi için)
         res = await client.aio.models.generate_content(
@@ -247,7 +264,7 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Güvenlik filtresi eklendi (Hata vermemesi için)
         res = await client.aio.models.generate_content(
             model=MODEL_NAME, 
-            contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla. toplamda maksimum 150 kelime olsun",
+            contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla. maksimum 120 kelime kullan ama asla yıldız işareti(*) kullanma.",
             config=types.GenerateContentConfig(
                 safety_settings=[
                     types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
@@ -258,7 +275,7 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         )
         await status.edit_text(f"🔮 TAROT FALI:\n\n{res.text}")
-    except: await status.edit_text("❌ Bağlantı koptu.")
+    except: await status.edit_text("Tüh bağlantı koptu.")
 
 # --- 5. ANA ÇALIŞTIRICI ---
 
@@ -269,6 +286,16 @@ async def main():
     asyncio.create_task(background_scheduler())
     
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
+    
+    # --- YENİ EKLENEN GÜVENLİK DUVARI ---
+    # Sadece yetkili grupları ve özel mesajdaki Admin'i izinli sayar
+    allowed_filter = filters.Chat(chat_id=ALLOWED_GROUPS) | (filters.ChatType.PRIVATE & filters.User(user_id=ADMIN_ID))
+    
+    # Bota gelen metin, komut, fotoğraf veya ses gibi etkileşimleri yakalar
+    interaction_filter = filters.TEXT | filters.COMMAND | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL
+    
+    # Eğer gelen işlem yetkili listeden DEĞİLSE, diğer komutlara hiç bakmadan direkt fırça atar ve işlemi keser
+    application.add_handler(MessageHandler(interaction_filter & (~allowed_filter), reject_unauthorized))
     
     # Komut Yakalayıcılar
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/update'), update_command))
