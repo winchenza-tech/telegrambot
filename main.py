@@ -2,6 +2,7 @@ import os
 import re 
 import io
 import random
+import time # Çakışma önleyici için eklendi
 import asyncio
 import nest_asyncio
 import datetime
@@ -37,7 +38,9 @@ def keep_alive():
 nest_asyncio.apply()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
-MODEL_NAME = 'gemini-2.0-flash'
+
+# Yapay Zeka Model Adı 2.5 Flash olarak güncellendi
+MODEL_NAME = 'gemini-2.5-flash'
 
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -150,7 +153,7 @@ async def background_scheduler():
 
 # --- 4. KOMUT MOTORLARI ---
 
-# 👑 ADMİN ÖZEL KOMUT
+# 👑 ADMİN ÖZEL KOMUT (Zaten mevcuttu, kontrol edildi)
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global IS_UPDATING
     if update.effective_user.id != ADMIN_ID: return 
@@ -202,7 +205,20 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         photo_file = await photo_obj.get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
         prompt = "Görseldeki kahve lekelerini somut nesnelere benzeterek dobra ve mistik bir dille yorumla. Klişelerden kaçın."
-        res = await client.aio.models.generate_content(model=MODEL_NAME, contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
+        
+        # Güvenlik filtresi eklendi (Hata vermemesi için)
+        res = await client.aio.models.generate_content(
+            model=MODEL_NAME, 
+            contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")],
+            config=types.GenerateContentConfig(
+                safety_settings=[
+                    types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
+                ]
+            )
+        )
         await status_msg.edit_text(f"☕ Zenithar Falcı Teyze:\n\n{res.text}")
     except: await status_msg.edit_text("⚠️ Fincanı okuyamadım.")
 
@@ -228,7 +244,19 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
     try:
-        res = await client.aio.models.generate_content(model=MODEL_NAME, contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla.")
+        # Güvenlik filtresi eklendi (Hata vermemesi için)
+        res = await client.aio.models.generate_content(
+            model=MODEL_NAME, 
+            contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla.",
+            config=types.GenerateContentConfig(
+                safety_settings=[
+                    types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
+                ]
+            )
+        )
         await status.edit_text(f"🔮 TAROT FALI:\n\n{res.text}")
     except: await status.edit_text("❌ Bağlantı koptu.")
 
@@ -258,5 +286,9 @@ async def main():
     while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
-    try: asyncio.run(main())
-    except: pass
+    try: 
+        print("Eski bot örneğinin kapanması bekleniyor...")
+        time.sleep(10) # Çakışma önleyici
+        asyncio.run(main())
+    except Exception as e: 
+        print(f"Kritik Hata: {e}")
