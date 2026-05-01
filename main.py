@@ -103,7 +103,7 @@ async def update_all_horoscopes():
                 try:
                     print(f"📡 {burc.upper()} internetten çekiliyor (Deneme: {retry_count + 1})...")
                     prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
-                              f"Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 135 kelime kullan. "
+                              f"Biraz alaycı samimi bir dil bilge ve mistik bir dille Türkçe yorumla. Maks 150 kelime kullan. Biraz samimi bir dil olsun biraz espri yapabilirsin yerine göre"
                               f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz")
                     
                     res = await client.aio.models.generate_content(
@@ -247,7 +247,7 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # Güvenlik filtresi eklendi (Hata vermemesi için)
         res = await client.aio.models.generate_content(
             model=MODEL_NAME, 
-            contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla.",
+            contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla. toplamda maksimum 150 kelime olsun",
             config=types.GenerateContentConfig(
                 safety_settings=[
                     types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
