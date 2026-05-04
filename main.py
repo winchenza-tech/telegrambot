@@ -2,12 +2,14 @@ import os
 import re 
 import io
 import random
-import time # Çakışma önleyici için eklendi
+import time 
 import asyncio
 import nest_asyncio
 import datetime
 import pytz
-from collections import deque # Son 10 mesaj hafızası için eklendi
+import html 
+import json # Puan yedekleme için eklendi
+from collections import deque 
 from flask import Flask
 from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -16,9 +18,9 @@ from google import genai
 from google.genai import types
 
 # --- 1. AYARLAR VE GLOBAL DEĞİŞKENLER ---
-UPDATE_HOUR = 2  # Gece otomatik güncelleme saati (Türkiye saati ile 02:00)
-ADMIN_IDS = [7094870780, 8639720888]  # Admin ID'leri
-ALLOWED_GROUPS = [-1003938704852, -1003297262036] # İzin verilen gruplar
+UPDATE_HOUR = 2  
+ADMIN_IDS = [7094870780, 8639720888]  
+ALLOWED_GROUPS = [-1003938704852, -1003297262036] 
 
 # --- WEB SUNUCUSU ---
 flask_app = Flask(__name__)
@@ -63,8 +65,9 @@ TAROT_CARDS = [
 RECENT_MESSAGES = {group_id: deque(maxlen=10) for group_id in ALLOWED_GROUPS}
 MESSAGE_LOOKUP = {} 
 
-# --- RPG OYUN DURUMU ---
+# --- RPG OYUN DURUMU VE PUAN TABLOSU ---
 RPG_GAMES = {}
+RPG_SCORES = {} # Puan tablosu hafızası { user_id: {"name": "isim", "score": 100} }
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 
@@ -142,13 +145,63 @@ async def background_scheduler():
 
 # --- 4. KOMUT MOTORLARI ---
 
-# RPG OYUN MOTORU EKLENDİ
+# RPG PUAN SIRALAMASI
+async def rpgpuan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    
+    if not RPG_SCORES:
+        await update.message.reply_text("Henüz hiç puan yok. İlk kanı kim dökecek?")
+        return
+        
+    sorted_scores = sorted(RPG_SCORES.values(), key=lambda x: x["score"], reverse=True)
+    
+    text = "🏆 <b>RPG HAYATTA KALMA SIRALAMASI</b> 🏆\n\n"
+    for i, p in enumerate(sorted_scores):
+        if i == 0: emoji = "⚔️"
+        elif i == 1: emoji = "🛡️"
+        elif i == 2: emoji = "🚩"
+        else: emoji = "👤"
+        
+        text += f"{i+1}. {emoji} {html.escape(p['name'])} - {p['score']} Puan\n"
+        
+    await update.message.reply_text(text, parse_mode="HTML")
+
+# YEDEKLEME (ADMİN)
+async def puanyedek_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != 'private': return
+    if update.effective_user.id not in ADMIN_IDS: return
+    
+    backup_str = json.dumps(RPG_SCORES, ensure_ascii=False)
+    await update.message.reply_text(f"Aşağıdaki komutu kopyalayıp güncellemelerden sonra bota yapıştırarak puanları geri yükleyebilirsin:\n\n`/puanla {backup_str}`", parse_mode="Markdown")
+
+# GERİ YÜKLEME (ADMİN)
+async def puanla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != 'private': return
+    if update.effective_user.id not in ADMIN_IDS: return
+    
+    metin = update.message.text
+    temiz_args = re.sub(r'(?i)^/puanla(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip()
+    
+    if not temiz_args:
+        await update.message.reply_text("❗ Lütfen /puanyedek komutundan aldığınız JSON verisini yapıştırın.")
+        return
+        
+    try:
+        global RPG_SCORES
+        loaded = json.loads(temiz_args)
+        # JSON keyleri string yaptığı için geri int formatına çeviriyoruz
+        RPG_SCORES = {int(k): v for k, v in loaded.items()}
+        await update.message.reply_text("✅ Puan tablosu başarıyla geri yüklendi!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Veri yüklenemedi. Format hatalı olabilir: {e}")
+
+# RPG OYUN MOTORU
 async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     chat_id = update.effective_chat.id
     
     if chat_id in RPG_GAMES and RPG_GAMES[chat_id].get("is_active"):
-        await update.message.reply_text("⏳ Zaten devam eden veya bekleyen bir RPG oyunu var")
+        await update.message.reply_text("⏳ Zaten devam eden veya bekleyen bir RPG oyunu var!")
         return
         
     keyboard = [
@@ -159,7 +212,7 @@ async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🪓 Arınma Gecesi", callback_data="rpg_scen_arinma")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🎲 zenithaRPG oyununa hoş geldiniz. Oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup, parse_mode="Markdown")
+    await update.message.reply_text("🎲 Mini RPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
 
 async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -184,11 +237,15 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "scenario": scenario,
             "players": {},
             "round": 1,
-            "last_message_id": None
+            "last_message_id": None,
+            "current_caption": "",
+            "recorded_actions": [],
+            "is_photo_msg": False,
+            "round_points_log": {} # O oyunda kazanılan puanları takip etmek için
         }
         
         keyboard = [[InlineKeyboardButton("🙋‍♂️ Oyuna Katıl", callback_data="rpg_join")]]
-        await query.edit_message_text(f"🎬 Senaryo: {scenario} seçildi!\n\nOyuna katılmak için aşağıdaki butona basın. Macera 30 saniye sonra başlayacak!", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        await query.edit_message_text(f"🎬 Senaryo: {scenario} seçildi!\n\nOyuna katılmak için aşağıdaki butona basın. Macera 60 saniye sonra başlayacak!", reply_markup=InlineKeyboardMarkup(keyboard))
         
         asyncio.create_task(run_rpg_game(chat_id, context))
         
@@ -200,12 +257,14 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "status": "alive",
                     "action": None
                 }
+                # Log için de hazırlık yap
+                RPG_GAMES[chat_id]["round_points_log"][user.id] = 0
                 await context.bot.send_message(chat_id, f"✅ {user.first_name} oyuna katıldı!")
             else:
                 await context.bot.send_message(chat_id, f"{user.first_name}, zaten katıldın sabret!")
 
 async def run_rpg_game(chat_id, context):
-    await asyncio.sleep(45)
+    await asyncio.sleep(60) # KATILIM SÜRESİ 60 SANİYE
     game = RPG_GAMES.get(chat_id)
     if not game or len(game["players"]) == 0:
         await context.bot.send_message(chat_id, "😢 Kimse katılmadı, RPG oyunu iptal edildi.")
@@ -216,30 +275,37 @@ async def run_rpg_game(chat_id, context):
     players = game["players"]
     scenario = game["scenario"]
     
+    scenario_desc = scenario
+    if "Arınma" in scenario:
+        scenario_desc = "Arınma Gecesi (Herkesin birbirini acımasızca avladığı, yasanın olmadığı, kıyamet benzeri ölümcül bir gece)"
+    
     player_names = ", ".join([p["name"] for p in players.values()])
+    
+    round_points = {1: 10, 2: 20, 3: 30, 4: 40}
     
     for round_num in range(1, 5):
         game["round"] = round_num
+        game["recorded_actions"] = [] 
         
         for uid in players: players[uid]["action"] = None
             
         alive_players = [p for p in players.values() if p["status"] == "alive"]
         if len(alive_players) == 0:
-            await context.bot.send_message(chat_id, "💀 **Oyun Bitti!** Herkes öldü... Kimse hayatta kalamadı.Mallar", parse_mode="Markdown")
+            await context.bot.send_message(chat_id, "💀 <b>Oyun Bitti!</b> Herkes öldü... Kimse hayatta kalamadı.", parse_mode="HTML")
             break
             
         actions_text = ""
         if round_num > 1:
             for p in alive_players:
                 if p["action"]: actions_text += f"{p['name']}: {p['action']}\n"
-                else: actions_text += f"{p['name']}: (Hiçbir şey yapmadı, bekledi)\n"
+                else: actions_text += f"{p['name']}: (Hiçbir şey yapmadı, eylemsiz kaldı)\n"
 
         if round_num == 1:
-            prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario}. Katılımcılar: {player_names}. Katılımcıları senaryo içinde farklı konumlara/durumlara yerleştirerek macerayı başlat. Maksimum 130 kelime. Acımasız ve gizemli bir Dungeon Master gibi anlat. Yıldız(*) kullanma.\n\nÖNEMLİ KURAL: Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla."
+            prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Katılımcılar: {player_names}. Katılımcıları senaryo içinde farklı konumlara/durumlara yerleştirerek macerayı başlat. Acımasız bir Dungeon Master gibi anlat.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için MAKSİMUM 30 KELİME, katılımcıların ne durumda olduğunu açıklamak için MAKSİMUM 20 KELİME kullan. Çok kısa ve öz ol! Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. Yıldız(*) kullanma."
         elif round_num < 4:
-            prompt = f"Senaryo: {scenario}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız, saçma sapan hamle yapanları veya 'Hiçbir şey yapmadı' diyenleri senaryoya uygun trajik veya komik şekilde vahşice ÖLDÜR. Mantıklı olanları yaşat, hikayeyi ilerlet ve yeni bir ölümcül kriz yarat. Maksimum 130 kelime.\n\nÖNEMLİ KURAL: Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. Yıldız(*) kullanma."
+            prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız hamle yapanları veya 'eylemsiz kaldı' diyenleri vahşice ÖLDÜR. Mantıklı olanları yaşat ve yeni bir ölümcül kriz yarat.\n\nÖNEMLİ KURAL: Ortamdaki yeni krizi açıklamak için MAKSİMUM 30 KELİME, katılımcıların durumunu açıklamak için MAKSİMUM 20 KELİME kullan. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. Yıldız(*) kullanma."
         else:
-            prompt = f"Senaryo: {scenario}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya şanslılarsa %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı veya feci şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat. Maksimum 130 kelime.\n\nÖNEMLİ KURAL: Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. Yıldız(*) kullanma."
+            prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat.\n\nÖNEMLİ KURAL: Finali açıklamak için MAKSİMUM 40 KELİME kullan. Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. Yıldız(*) kullanma."
             
         try:
             res = await client.aio.models.generate_content(
@@ -259,7 +325,6 @@ async def run_rpg_game(chat_id, context):
             await context.bot.send_message(chat_id, f"Sistem hatası: {e}. DM bayıldı, oyun iptal.")
             break
 
-        # Ölenleri Tespit Et ve Hikayeden o satırı sil
         display_text = text
         if "ÖLENLER:" in text.upper():
             lines = text.split('\n')
@@ -275,7 +340,34 @@ async def run_rpg_game(chat_id, context):
             
             display_text = "\n".join([l for l in lines if not l.upper().startswith("ÖLENLER:")]).strip()
 
-        # Görsel Belirleme
+        # PUANLAMA İŞLEMİ VE 2 KİŞİ KAZANMA DURUMU
+        current_alive_after_round = [uid for uid, p in players.items() if p["status"] == "alive"]
+        
+        pts_to_add = round_points.get(round_num, 0)
+        
+        # Eğer final turuysa ve 2 kişi hayatta kaldıysa, 40 yerine 70 puan ver
+        if round_num == 4 and len(current_alive_after_round) == 2:
+            pts_to_add = 70
+            
+        for uid in current_alive_after_round:
+            # Genel tabloya ekle
+            if uid not in RPG_SCORES:
+                RPG_SCORES[uid] = {"name": players[uid]["name"], "score": 0}
+            RPG_SCORES[uid]["score"] += pts_to_add
+            RPG_SCORES[uid]["name"] = players[uid]["name"]
+            
+            # Bu oyunun skor tablosuna ekle
+            game["round_points_log"][uid] += pts_to_add
+
+        display_text = html.escape(display_text)
+
+        current_alive_formatted = [f"<a href='tg://user?id={uid}'>{players[uid]['name']}</a>" for uid in current_alive_after_round]
+        alive_count = len(current_alive_formatted)
+        
+        alive_tags_text = "🟢 <b>Hayatta Kalanlar:</b> " + ", ".join(current_alive_formatted) if current_alive_formatted else "💀 Herkes öldü..."
+        if round_num >= 2 and alive_count > 0:
+            alive_tags_text += f"\n👥 <b>Hayatta Kalan:</b> {alive_count}"
+
         eng_scen = "rpg_game_scene"
         if "Zombi" in scenario: eng_scen = "zombie_apocalypse_survival"
         elif "Ada" in scenario: eng_scen = "deserted_island_survival"
@@ -285,24 +377,35 @@ async def run_rpg_game(chat_id, context):
         
         image_url = f"https://image.pollinations.ai/prompt/{eng_scen}_round_{round_num}?width=800&height=400&nologo=true"
         
-        msg_text = f"🎲 TUR {round_num}/4**\n\n{display_text}\n\n⏳ *Hamlenizi yapmak için BU MESAJI ALINTILAYIP cevap verin! Süreniz 60 saniye.*"
+        msg_text = f"🎲 <b>TUR {round_num}/4</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 90 saniye. Hamlenizi yapmak için bota ait BU MESAJI YANITLAYIN (Reply)!</i>"
         if round_num == 4:
-            msg_text = f"🚨 **FİNAL SONUCU**\n\n{display_text}"
+            # FİNAL MESAJINA PUAN TABLOSUNU EKLEME
+            scoreboard = "\n\n🏆 <b>OYUN SONU PUANLARI:</b>\n"
+            for uid, p in players.items():
+                puan = game["round_points_log"].get(uid, 0)
+                durum = "🎉 Kazandı!" if p["status"] == "alive" else "💀 Öldü"
+                scoreboard += f"- {html.escape(p['name'])}: +{puan} Puan ({durum})\n"
+                
+            msg_text = f"🚨 <b>FİNAL SONUCU</b>\n\n{display_text}\n\n{alive_tags_text}{scoreboard}"
+
+        game["current_caption"] = msg_text
 
         try:
-            msg = await context.bot.send_photo(chat_id, photo=image_url, caption=msg_text[:1024], parse_mode='Markdown')
+            msg = await context.bot.send_photo(chat_id, photo=image_url, caption=msg_text, parse_mode='HTML')
+            game["is_photo_msg"] = True
         except:
-            msg = await context.bot.send_message(chat_id, msg_text, parse_mode='Markdown')
+            msg = await context.bot.send_message(chat_id, msg_text, parse_mode='HTML')
+            game["is_photo_msg"] = False
             
         game["last_message_id"] = msg.message_id
         
         if round_num < 4:
-            await asyncio.sleep(90) # Hamleler için 60 saniye bekle
+            await asyncio.sleep(90) # OKUMA VE CEVAP YAZMA SÜRESİ 90 SANİYE
     
     await asyncio.sleep(2) 
     RPG_GAMES.pop(chat_id, None)
 
-# CANLI MESAJ YAKALAYICI (RPG Hamleleri ve Son 10 Mesaj)
+# CANLI MESAJ YAKALAYICI
 async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_chat: return
     chat_id = update.effective_chat.id
@@ -313,12 +416,24 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         # 1. RPG Oyunu Hamle Kontrolü
         if chat_id in RPG_GAMES and RPG_GAMES[chat_id]["status"] == "playing":
             game = RPG_GAMES[chat_id]
-            if msg.reply_to_message and msg.reply_to_message.message_id == game["last_message_id"]:
+            if msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id:
                 user_id = update.effective_user.id
                 if user_id in game["players"] and game["players"][user_id]["status"] == "alive":
-                    game["players"][user_id]["action"] = msg.text or msg.caption
-                    await msg.reply_text("⚔️ Hamlen kaydedildi!")
-                    return # Hamle ise son 10 mesaj arasına alıp kalabalık yapma
+                    if game["players"][user_id]["action"] is None: 
+                        game["players"][user_id]["action"] = msg.text or msg.caption
+                        user_name = game["players"][user_id]["name"]
+                        game["recorded_actions"].append(user_name)
+                        
+                        new_caption = game["current_caption"] + "\n\n✅ <b>Hamlesi Kaydedilenler:</b> " + ", ".join(game["recorded_actions"])
+                        
+                        try:
+                            if game["is_photo_msg"]:
+                                await context.bot.edit_message_caption(chat_id=chat_id, message_id=game["last_message_id"], caption=new_caption, parse_mode='HTML')
+                            else:
+                                await context.bot.edit_message_text(chat_id=chat_id, message_id=game["last_message_id"], text=new_caption, parse_mode='HTML')
+                        except Exception:
+                            pass 
+                        return 
 
         # 2. Son 10 Mesaj Hafızası
         text = msg.text or msg.caption
@@ -337,9 +452,9 @@ async def getir_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != 'private': return
     if update.effective_user.id not in ADMIN_IDS: return
     
-    response = "📜 **GRAPLARDAKİ SON MESAJLAR**\n\n"
+    response = "📜 GRUPLARDAKİ SON MESAJLAR\n\n"
     for group_id in ALLOWED_GROUPS:
-        response += f"🏢 **Grup ID:** `{group_id}`\n"
+        response += f"🏢 Grup ID: {group_id}\n"
         if not RECENT_MESSAGES[group_id]:
             response += "Henüz bot açıkken bu grupta mesaj yazılmadı.\n"
         else:
@@ -626,10 +741,12 @@ async def main():
     
     application.add_handler(MessageHandler(interaction_filter & (~allowed_filter), reject_unauthorized))
     
-    # Yeni eklenen RPG Buton Yakalayıcısı
     application.add_handler(CallbackQueryHandler(rpg_callback, pattern='^rpg_'))
     
     # Komutlar
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/rpgpuan'), rpgpuan_command))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/puanyedek'), puanyedek_command))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/puanla'), puanla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/rpg'), rpg_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/update'), update_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ama'), ama_command))
