@@ -16,7 +16,7 @@ from google.genai import types
 
 # --- 1. AYARLAR VE GLOBAL DEĞİŞKENLER ---
 UPDATE_HOUR = 2  # Gece otomatik güncelleme saati (Türkiye saati ile 02:00)
-ADMIN_ID = 7094870780  # Admin ID (Sadece bu ID özelden yazabilir ve /update çalıştırabilir)
+ADMIN_IDS = [7094870780, 8639720888]  # Admin ID'leri (Sadece bu ID'ler özelden yazabilir, /update ve /ama çalıştırabilir)
 ALLOWED_GROUPS = [-1003938704852, -1003297262036] # Sadece bu gruplarda çalışmasına izin verilir
 
 # --- WEB SUNUCUSU (Uygulamayı 7/24 Ayakta Tutar) ---
@@ -81,7 +81,7 @@ async def check_access(update: Update) -> bool:
     is_private = update.effective_chat.type == 'private'
     
     if is_private:
-        if user_id != ADMIN_ID:
+        if user_id not in ADMIN_IDS:
             await update.effective_message.reply_text("Bu botun yalnızca belirli gruplarda çalışmasına izin verdim. Sana yetki yok @eskidenyesil")
             return False
     else:
@@ -173,13 +173,79 @@ async def background_scheduler():
 # 👑 ADMİN ÖZEL KOMUT (Zaten mevcuttu, kontrol edildi)
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global IS_UPDATING
-    if update.effective_user.id != ADMIN_ID: return 
+    if update.effective_user.id not in ADMIN_IDS: return 
     
     if IS_UPDATING:
         await update.message.reply_text(" Bot şu anda zaten bir güncelleme yapıyor. Lütfen bitmesini bekle.")
     else:
         await update.message.reply_text("🔄 Manuel toplu güncelleme başlatıldı.\nHer burç arası 90 saniye bekleniyor.\nİşlem yaklaşık 18 dakika sürecektir.")
         asyncio.create_task(update_all_horoscopes())
+
+# 👑 YENİ ADMİN ÖZEL KOMUT (Anket - /ama) - YAPAY ZEKA DESTEKLİ DİNAMİK ÜRETİM
+async def ama_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.type != 'private': return
+    if update.effective_user.id not in ADMIN_IDS: return
+
+    # Cinsiyet ve olasılık belirleme
+    gender = random.choice(['Çocuk', 'Kız'])
+    is_high_score = random.random() < 0.60 # %60 ihtimalle yüksek puan (>7)
+
+    status_msg = await update.message.reply_text("🤔 Anket sorusu yapay zeka tarafından yaratılıyor...")
+
+    if is_high_score:
+        score = random.randint(8, 10)
+        prompt = f"Bir {gender.lower()} düşün. Dış görünüşü {score}/10 (çok iyi) ama çok absürt, komik veya biraz itici bir huyu var. Cümle '{gender} {score}/10 ama...' diye başlıyor. Sen sadece 'ama'dan sonraki huyu yaz. Asla başka bir kelime, açıklama veya sonuna nokta kullanma. Maksimum 5-6 kelime. Örnek: yerlere tükürüyor, altına işiyor, sadece kızlarla arkadaş, sürekli ağlıyor, tırnaklarını yiyor."
+    else:
+        score = random.randint(1, 7)
+        prompt = f"Bir {gender.lower()} düşün. Dış görünüşü {score}/10 (düşük/ortalama) ama çok spesifik, komik veya şaşırtıcı derecede olumlu/ilginç bir özelliği var. Cümle '{gender} {score}/10 ama...' diye başlıyor. Sen sadece 'ama'dan sonraki özelliği yaz. Asla başka bir kelime, açıklama veya sonuna nokta kullanma. Maksimum 5-6 kelime. Örnek: kısmetse olur izliyor, çok sadık, harika yemek yapıyor, hesabını kendi ödüyor."
+
+    try:
+        res = await client.aio.models.generate_content(
+            model=MODEL_NAME, 
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                safety_settings=[
+                    types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
+                ]
+            )
+        )
+        # Yapay zekadan gelen metni temizle (başındaki/sonundaki boşlukları ve noktaları sil)
+        trait = res.text.strip().lower()
+        trait = re.sub(r'^\.+|\.+$', '', trait).strip()
+    except Exception as e:
+        # API Hata verirse veya yanıt alamazsa varsayılan bir tane seç (Güvenlik ağı)
+        trait = "sürekli uyuyor"
+        print(f"Ama komutu AI hatası: {e}")
+
+    question_text = f"🧪 Beta Özellik | {gender} {score}/10 ama {trait} 🤔"
+    
+    # 5 şıklı eğlenceli anket seçenekleri
+    options = [
+        "Kesinlikle nikahı basarım! 😍💍",
+        "Bir şans verilir... Görmezden gelinir 🤔",
+        "Arkadaş kalalım biz kanka 😬",
+        "Asla! Anında engellerim 🏃‍♂️💨",
+        "Önce bir tedavi görsün 🏥"
+    ]
+
+    success_count = 0
+    for group_id in ALLOWED_GROUPS:
+        try:
+            await context.bot.send_poll(
+                chat_id=group_id,
+                question=question_text,
+                options=options,
+                is_anonymous=False 
+            )
+            success_count += 1
+        except Exception as e:
+            print(f"Anket {group_id} grubuna gönderilemedi: {e}")
+    
+    await status_msg.edit_text(f"✅ Soru üretildi ve {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {question_text}")
+
 
 # ✨ BURÇ KOMUTU
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -288,8 +354,8 @@ async def main():
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
     # --- YENİ EKLENEN GÜVENLİK DUVARI ---
-    # Sadece yetkili grupları ve özel mesajdaki Admin'i izinli sayar
-    allowed_filter = filters.Chat(chat_id=ALLOWED_GROUPS) | (filters.ChatType.PRIVATE & filters.User(user_id=ADMIN_ID))
+    # Sadece yetkili grupları ve özel mesajdaki Adminleri izinli sayar
+    allowed_filter = filters.Chat(chat_id=ALLOWED_GROUPS) | (filters.ChatType.PRIVATE & filters.User(user_id=ADMIN_IDS))
     
     # Bota gelen metin, komut, fotoğraf veya ses gibi etkileşimleri yakalar
     interaction_filter = filters.TEXT | filters.COMMAND | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL
@@ -299,6 +365,7 @@ async def main():
     
     # Komut Yakalayıcılar
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/update'), update_command))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ama'), ama_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/tarotbak'), tarot_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/burcyorumla'), burcyorumla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
