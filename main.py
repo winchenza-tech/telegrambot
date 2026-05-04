@@ -175,12 +175,11 @@ async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔄 Manuel toplu güncelleme başlatıldı.\nHer burç arası 90 saniye bekleniyor.\nİşlem yaklaşık 18 dakika sürecektir.")
         asyncio.create_task(update_all_horoscopes())
 
-# 👑 YENİ ADMİN ÖZEL KOMUT (Anket - /ama) - KAPSAYICI (ÇOCUK/KIZ) VE BETA YAZISI KALDIRILDI
+# 👑 YENİ ADMİN ÖZEL KOMUT (Anket - /ama) - MAKS 10 KELİME ŞIK VE BAŞA EMOJİ EKLENDİ
 async def ama_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != 'private': return
     if update.effective_user.id not in ADMIN_IDS: return
 
-    # Artık tek tip kapsayıcı ifade kullanıyoruz
     gender = "Çocuk/Kız"
     is_high_score = random.random() < 0.60 
 
@@ -198,8 +197,10 @@ Ayrıca bu duruma insanların verebileceği 5 farklı anketi şıkkını yaz.
 1. Şıklarda KESİNLİKLE emoji KULLANMA. Sadece düz metin olsun.
 2. Şıklar oluşturduğun bu spesifik duruma tam uygun olsun.
 3. Olumsuz veya sinirli şıklarda 'amk' kelimesini kullanabilirsin.
+4. Her bir şık MAKSİMUM 10 KELİME olmalıdır.
 
 Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
+Emoji: [Duruma uygun tek bir emoji]
 Özellik: [Sadece ama'dan sonraki kısım]
 1- [Şık 1]
 2- [Şık 2]
@@ -208,6 +209,7 @@ Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
 5- [Şık 5]"""
 
     # Varsayılan değerler
+    emoji = "🤔"
     trait = "eski sevgilisiyle hala yakın arkadaş"
     options = [
         "Sıkıntı yok güveniyorsam tamam",
@@ -235,7 +237,9 @@ Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
         parsed_options = []
         
         for line in lines:
-            if line.startswith("Özellik:"):
+            if line.startswith("Emoji:"):
+                emoji = line.replace("Emoji:", "").strip()
+            elif line.startswith("Özellik:"):
                 trait = line.replace("Özellik:", "").strip()
             elif re.match(r'^[1-5][-.)]\s*', line):
                 clean_opt = re.sub(r'^[1-5][-.)]\s*', '', line).strip()
@@ -248,8 +252,8 @@ Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
     except Exception as e:
         print(f"Ama komutu AI hatası veya Parse hatası: {e}")
 
-    # Telegram Sınırları Koruyucusu ve Beta Özellik yazısının kaldırılması
-    question_text = f"{gender} {score}/10 ama {trait}?"
+    # Başında emoji ile Soru Formatı
+    question_text = f"{emoji} {gender} {score}/10 ama {trait}?"
     question_text = question_text[:290] # Soru max 300 karakter
 
     # Şıkları benzersiz yap (Duplicate Option Hatasını Önle) ve 100 karaktere kırp
@@ -282,7 +286,7 @@ Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
             error_messages.append(error_text)
     
     if success_count > 0:
-        await status_msg.edit_text(f"✅ Soru {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {gender} {score}/10 ama {trait}")
+        await status_msg.edit_text(f"✅ Soru {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {emoji} {gender} {score}/10 ama {trait}")
     else:
         hata_raporu = "\n\n".join(error_messages)
         await status_msg.edit_text(f"⚠️ Anket 0 gruba gönderildi! Sorun Telegram tarafından engellendi.\n\nİşte detaylar:\n{hata_raporu}")
