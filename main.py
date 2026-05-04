@@ -59,7 +59,7 @@ TAROT_CARDS = [
     "Ay", "Güneş", "Mahkeme", "Dünya"
 ]
 
-# --- CANLI MESAJ HAFIZASI (YENİ EKLENDİ) ---
+# --- CANLI MESAJ HAFIZASI ---
 # Her grup için son 10 mesajı bellekte tutar
 RECENT_MESSAGES = {group_id: deque(maxlen=10) for group_id in ALLOWED_GROUPS}
 # Linkten mesaj bulabilmek için hızlı sözlük
@@ -142,18 +142,16 @@ async def background_scheduler():
 
 # --- 4. KOMUT MOTORLARI ---
 
-# CANLI MESAJ YAKALAYICI (YENİ EKLENDİ - SADECE GRUPTAKİ MESAJLARI DİNLER VE HAFIZAYA ALIR)
+# CANLI MESAJ YAKALAYICI 
 async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_chat: return
     chat_id = update.effective_chat.id
     
-    # Sadece yetkili gruplardaki mesajları logla
     if chat_id in ALLOWED_GROUPS:
         text = update.effective_message.text or update.effective_message.caption
-        if text: # Sadece yazılı mesajları hafızaya alır
+        if text: 
             msg_id = update.effective_message.message_id
             user = update.effective_user.first_name
-            # Telegram grup linki formülüne göre ID düzeltilir (-100 kaldırılır)
             link_chat_id = str(chat_id).replace("-100", "", 1)
             link = f"https://t.me/c/{link_chat_id}/{msg_id}"
             
@@ -161,7 +159,7 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             RECENT_MESSAGES[chat_id].append(msg_data)
             MESSAGE_LOOKUP[link] = msg_data
 
-# /getir KOMUTU (YENİ EKLENDİ - SON 10 MESAJI DÖKER)
+# /getir KOMUTU 
 async def getir_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != 'private': return
     if update.effective_user.id not in ADMIN_IDS: return
@@ -173,23 +171,26 @@ async def getir_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response += "Henüz bot açıkken bu grupta mesaj yazılmadı.\n"
         else:
             for msg in RECENT_MESSAGES[group_id]:
-                # Mesaj uzunsa kısaltarak göster (kalabalık yapmasın diye)
                 kisa_text = msg['text'][:40] + "..." if len(msg['text']) > 40 else msg['text']
                 response += f"👤 {msg['user']}: {kisa_text}\n🔗 {msg['link']}\n"
         response += "\n"
         
     await update.message.reply_text(response, disable_web_page_preview=True)
 
-# /anketle KOMUTU (YENİ EKLENDİ - GÜNDEM ANKETİ YARATIR)
+# /anketle KOMUTU (DÜZELTİLDİ - ARTIK LİNKİ DOĞRU OKUYACAK)
 async def anketle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != 'private': return
     if update.effective_user.id not in ADMIN_IDS: return
 
-    if not context.args:
+    # Regex ile tetiklendiği için mesajı manuel temizliyoruz
+    metin = update.message.text
+    temiz_args = re.sub(r'(?i)^/anketle(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip()
+    
+    if not temiz_args:
         await update.message.reply_text("❗ Lütfen bir mesaj linki girin.\nÖrnek: `/anketle https://t.me/c/12345/678`")
         return
         
-    link = context.args[0].strip()
+    link = temiz_args
     msg_data = MESSAGE_LOOKUP.get(link)
     
     if not msg_data:
@@ -253,7 +254,6 @@ Soru: [En başa Emoji] [Soru metni]
         await status_msg.edit_text(f"❌ Yapay zeka soruyu üretemedi: {e}")
         return
 
-    # Telegram limitleri koruması
     question_text = question_text[:290] 
     safe_options = []
     for opt in options:
@@ -264,7 +264,6 @@ Soru: [En başa Emoji] [Soru metni]
             safe_options.append(clean_opt + " (Katılıyorum)") 
             
     try:
-        # Anketi doğrudan o mesajın atıldığı spesifik gruba gönderir
         await context.bot.send_poll(
             chat_id=target_group,
             question=question_text,
