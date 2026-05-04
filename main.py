@@ -43,7 +43,7 @@ nest_asyncio.apply()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-# Model Gemini 3.0 Flash olarak güncellendi!
+# Model tekrar stabil sürüm olan Gemini 2.5 Flash'a döndürüldü!
 MODEL_NAME = 'gemini-2.5-flash'
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -323,7 +323,7 @@ async def run_rpg_game(chat_id, context):
             )
             text = res.text
         except Exception as e:
-            await context.bot.send_message(chat_id, f"Sistem hatası: {e}. zenithar'ın suçu yok, yapay zeka bayıldı, oyun iptal.")
+            await context.bot.send_message(chat_id, f"Sistem hatası: {e}. DM bayıldı, oyun iptal.")
             break
 
         display_text = text
