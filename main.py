@@ -73,7 +73,6 @@ RPG_SCORES = {}
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 
-# GÜÇLENDİRİLMİŞ 503 VE GÜVENLİK DİRENÇ MOTORU
 async def safe_generate(contents, config=None, retries=5):
     for attempt in range(retries):
         try:
@@ -82,13 +81,12 @@ async def safe_generate(contents, config=None, retries=5):
                 contents=contents,
                 config=config
             )
-            # Yanıtın Google güvenlik duvarına çarpıp çarpmadığını (boş dönüp dönmediğini) test et
             _ = res.text 
             return res
         except Exception as e:
             if attempt == retries - 1:
                 raise e 
-            await asyncio.sleep(5) # Süre 5 saniyeye, deneme sayısı 5'e çıkarıldı.
+            await asyncio.sleep(5) 
 
 def turkce_karakter_duzelt(metin):
     metin = metin.lower().strip()
@@ -302,25 +300,26 @@ async def run_rpg_game(chat_id, context):
         
         for round_num in range(1, 5):
             game["round"] = round_num
-            game["recorded_actions"] = [] 
             
-            for uid in players: players[uid]["action"] = None
-                
             alive_players = [p for p in players.values() if p["status"] == "alive"]
             if len(alive_players) == 0:
                 await context.bot.send_message(chat_id, "💀 <b>Oyun Bitti!</b> Herkes öldü... Kimse hayatta kalamadı.", parse_mode="HTML")
                 break
                 
+            # --- 1. DÜZELTME: Önceki turun hamlelerini OKU ---
             actions_text = ""
             if round_num > 1:
                 for p in alive_players:
                     if p["action"]: actions_text += f"{p['name']}: {p['action']}\n"
                     else: actions_text += f"{p['name']}: (Hiçbir şey yapmadı, eylemsiz kaldı)\n"
 
+            # --- 2. DÜZELTME: Okuduktan SONRA yeni tur için hamleleri sıfırla ---
+            game["recorded_actions"] = [] 
+            for uid in players: players[uid]["action"] = None
+
             if round_num == 1:
                 prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Katılımcılar: {player_names}. Katılımcıları senaryo içinde farklı konumlara/durumlara yerleştirerek macerayı başlat. Acımasız ve edebi bir Dungeon Master gibi anlat. Karakterlerin durumunu derinleştirerek hikayeleştir.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir katılımcının durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma."
             elif round_num < 4:
-                # Prompt Güvenlik İçin Hafifletildi ("vahşice ÖLDÜR" -> "acımasızca ÖLDÜR veya trajik şekilde elenmesini sağla")
                 prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız hamle yapanları veya 'eylemsiz kaldı' diyenleri acımasızca ÖLDÜR veya trajik şekilde elenmesini sağla. Mantıklı olanları yaşat ve yeni bir ölümcül kriz yarat.\n\nÖNEMLİ KURAL: Ortamdaki yeni krizi ve atmosferi açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir karakterin hamle sonucunu ve yeni durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. ASLA yıldız(*) kullanma."
             else:
                 prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat. Karakter durumlarını epik bir dille hikayeleştir.\n\nÖNEMLİ KURAL: Ortamı ve finalin genel sonucunu açıklamak için 30 İLA 40 KELİME ARASI kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. ASLA yıldız(*) kullanma."
@@ -776,7 +775,8 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/falbak'), falbak_command))
 
-    application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), log_message))
+    # --- DÜZELTME: Artık fotoğraf/ses/video ile yapılan reply'ları da okuyacak ---
+    application.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO) & (~filters.COMMAND), log_message))
     
     print(f"Zenithar Services Başlatıldı. (Manuel Başlangıç ve 02:00 Oto-Güncelleme)")
     
