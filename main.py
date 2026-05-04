@@ -10,8 +10,8 @@ import pytz
 from collections import deque # Son 10 mesaj hafızası için eklendi
 from flask import Flask
 from threading import Thread
-from telegram import Update
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, CallbackQueryHandler
 from google import genai
 from google.genai import types
 
@@ -60,10 +60,11 @@ TAROT_CARDS = [
 ]
 
 # --- CANLI MESAJ HAFIZASI ---
-# Her grup için son 10 mesajı bellekte tutar
 RECENT_MESSAGES = {group_id: deque(maxlen=10) for group_id in ALLOWED_GROUPS}
-# Linkten mesaj bulabilmek için hızlı sözlük
 MESSAGE_LOOKUP = {} 
+
+# --- RPG OYUN DURUMU ---
+RPG_GAMES = {}
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 
@@ -76,7 +77,6 @@ def turkce_karakter_duzelt(metin):
 
 async def check_access(update: Update) -> bool:
     if not update.effective_message: return False
-    
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
     is_private = update.effective_chat.type == 'private'
@@ -142,15 +142,188 @@ async def background_scheduler():
 
 # --- 4. KOMUT MOTORLARI ---
 
-# CANLI MESAJ YAKALAYICI 
+# RPG OYUN MOTORU EKLENDİ
+async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    chat_id = update.effective_chat.id
+    
+    if chat_id in RPG_GAMES and RPG_GAMES[chat_id].get("is_active"):
+        await update.message.reply_text("⏳ Zaten devam eden veya bekleyen bir RPG oyunu var")
+        return
+        
+    keyboard = [
+        [InlineKeyboardButton("🏝️ Issız Ada", callback_data="rpg_scen_ada"),
+         InlineKeyboardButton("🧟 Zombi Salgını", callback_data="rpg_scen_zombi")],
+        [InlineKeyboardButton("🦇 Tekinsiz Mağara", callback_data="rpg_scen_magara"),
+         InlineKeyboardButton("☢️ Kıyamet", callback_data="rpg_scen_kiyamet")],
+        [InlineKeyboardButton("🪓 Arınma Gecesi", callback_data="rpg_scen_arinma")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text("🎲 zenithaRPG oyununa hoş geldiniz. Oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup, parse_mode="Markdown")
+
+async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+    data = query.data
+    
+    if data.startswith("rpg_scen_"):
+        scenarios = {
+            "rpg_scen_ada": "Issız Ada",
+            "rpg_scen_zombi": "Zombi Salgını",
+            "rpg_scen_magara": "Tekinsiz Mağara",
+            "rpg_scen_kiyamet": "Kıyamet",
+            "rpg_scen_arinma": "Arınma Gecesi"
+        }
+        scenario = scenarios[data]
+        
+        RPG_GAMES[chat_id] = {
+            "is_active": True,
+            "status": "waiting_players",
+            "scenario": scenario,
+            "players": {},
+            "round": 1,
+            "last_message_id": None
+        }
+        
+        keyboard = [[InlineKeyboardButton("🙋‍♂️ Oyuna Katıl", callback_data="rpg_join")]]
+        await query.edit_message_text(f"🎬 Senaryo: {scenario} seçildi!\n\nOyuna katılmak için aşağıdaki butona basın. Macera 30 saniye sonra başlayacak!", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode='Markdown')
+        
+        asyncio.create_task(run_rpg_game(chat_id, context))
+        
+    elif data == "rpg_join":
+        if chat_id in RPG_GAMES and RPG_GAMES[chat_id]["status"] == "waiting_players":
+            if user.id not in RPG_GAMES[chat_id]["players"]:
+                RPG_GAMES[chat_id]["players"][user.id] = {
+                    "name": user.first_name,
+                    "status": "alive",
+                    "action": None
+                }
+                await context.bot.send_message(chat_id, f"✅ {user.first_name} oyuna katıldı!")
+            else:
+                await context.bot.send_message(chat_id, f"{user.first_name}, zaten katıldın sabret!")
+
+async def run_rpg_game(chat_id, context):
+    await asyncio.sleep(30)
+    game = RPG_GAMES.get(chat_id)
+    if not game or len(game["players"]) == 0:
+        await context.bot.send_message(chat_id, "😢 Kimse katılmadı, RPG oyunu iptal edildi.")
+        RPG_GAMES.pop(chat_id, None)
+        return
+        
+    game["status"] = "playing"
+    players = game["players"]
+    scenario = game["scenario"]
+    
+    player_names = ", ".join([p["name"] for p in players.values()])
+    
+    for round_num in range(1, 5):
+        game["round"] = round_num
+        
+        for uid in players: players[uid]["action"] = None
+            
+        alive_players = [p for p in players.values() if p["status"] == "alive"]
+        if len(alive_players) == 0:
+            await context.bot.send_message(chat_id, "💀 **Oyun Bitti!** Herkes öldü... Kimse hayatta kalamadı.Mallar", parse_mode="Markdown")
+            break
+            
+        actions_text = ""
+        if round_num > 1:
+            for p in alive_players:
+                if p["action"]: actions_text += f"{p['name']}: {p['action']}\n"
+                else: actions_text += f"{p['name']}: (Hiçbir şey yapmadı, bekledi)\n"
+
+        if round_num == 1:
+            prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario}. Katılımcılar: {player_names}. Katılımcıları senaryo içinde farklı konumlara/durumlara yerleştirerek macerayı başlat. Maksimum 130 kelime. Acımasız ve gizemli bir Dungeon Master gibi anlat. Yıldız(*) kullanma.\n\nÖNEMLİ KURAL: Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla."
+        elif round_num < 4:
+            prompt = f"Senaryo: {scenario}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız, saçma sapan hamle yapanları veya 'Hiçbir şey yapmadı' diyenleri senaryoya uygun trajik veya komik şekilde vahşice ÖLDÜR. Mantıklı olanları yaşat, hikayeyi ilerlet ve yeni bir ölümcül kriz yarat. Maksimum 130 kelime.\n\nÖNEMLİ KURAL: Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. Yıldız(*) kullanma."
+        else:
+            prompt = f"Senaryo: {scenario}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya şanslılarsa %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı veya feci şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat. Maksimum 130 kelime.\n\nÖNEMLİ KURAL: Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. Yıldız(*) kullanma."
+            
+        try:
+            res = await client.aio.models.generate_content(
+                model=MODEL_NAME, 
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    safety_settings=[
+                        types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+                        types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+                        types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+                        types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
+                    ]
+                )
+            )
+            text = res.text
+        except Exception as e:
+            await context.bot.send_message(chat_id, f"Sistem hatası: {e}. DM bayıldı, oyun iptal.")
+            break
+
+        # Ölenleri Tespit Et ve Hikayeden o satırı sil
+        display_text = text
+        if "ÖLENLER:" in text.upper():
+            lines = text.split('\n')
+            dead_line = ""
+            for line in lines:
+                if line.upper().startswith("ÖLENLER:"):
+                    dead_line = line
+                    break
+            
+            for uid, p in players.items():
+                if p["name"].lower() in dead_line.lower() and p["status"] == "alive":
+                    p["status"] = "dead"
+            
+            display_text = "\n".join([l for l in lines if not l.upper().startswith("ÖLENLER:")]).strip()
+
+        # Görsel Belirleme
+        eng_scen = "rpg_game_scene"
+        if "Zombi" in scenario: eng_scen = "zombie_apocalypse_survival"
+        elif "Ada" in scenario: eng_scen = "deserted_island_survival"
+        elif "Mağara" in scenario: eng_scen = "creepy_dark_cave"
+        elif "Kıyamet" in scenario: eng_scen = "post_apocalyptic_wasteland"
+        elif "Arınma" in scenario: eng_scen = "purge_anarchy_street"
+        
+        image_url = f"https://image.pollinations.ai/prompt/{eng_scen}_round_{round_num}?width=800&height=400&nologo=true"
+        
+        msg_text = f"🎲 **TUR {round_num}/4**\n\n{display_text}\n\n⏳ *Hamlenizi yapmak için BU MESAJI ALINTILAYIP cevap verin! Süreniz 60 saniye.*"
+        if round_num == 4:
+            msg_text = f"🚨 **FİNAL SONUCU**\n\n{display_text}"
+
+        try:
+            msg = await context.bot.send_photo(chat_id, photo=image_url, caption=msg_text[:1024], parse_mode='Markdown')
+        except:
+            msg = await context.bot.send_message(chat_id, msg_text, parse_mode='Markdown')
+            
+        game["last_message_id"] = msg.message_id
+        
+        if round_num < 4:
+            await asyncio.sleep(60) # Hamleler için 60 saniye bekle
+    
+    await asyncio.sleep(2) 
+    RPG_GAMES.pop(chat_id, None)
+
+# CANLI MESAJ YAKALAYICI (RPG Hamleleri ve Son 10 Mesaj)
 async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.effective_message or not update.effective_chat: return
     chat_id = update.effective_chat.id
     
     if chat_id in ALLOWED_GROUPS:
-        text = update.effective_message.text or update.effective_message.caption
+        msg = update.effective_message
+        
+        # 1. RPG Oyunu Hamle Kontrolü
+        if chat_id in RPG_GAMES and RPG_GAMES[chat_id]["status"] == "playing":
+            game = RPG_GAMES[chat_id]
+            if msg.reply_to_message and msg.reply_to_message.message_id == game["last_message_id"]:
+                user_id = update.effective_user.id
+                if user_id in game["players"] and game["players"][user_id]["status"] == "alive":
+                    game["players"][user_id]["action"] = msg.text or msg.caption
+                    await msg.reply_text("⚔️ Hamlen kaydedildi!")
+                    return # Hamle ise son 10 mesaj arasına alıp kalabalık yapma
+
+        # 2. Son 10 Mesaj Hafızası
+        text = msg.text or msg.caption
         if text: 
-            msg_id = update.effective_message.message_id
+            msg_id = msg.message_id
             user = update.effective_user.first_name
             link_chat_id = str(chat_id).replace("-100", "", 1)
             link = f"https://t.me/c/{link_chat_id}/{msg_id}"
@@ -177,12 +350,11 @@ async def getir_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     await update.message.reply_text(response, disable_web_page_preview=True)
 
-# /anketle KOMUTU (DÜZELTİLDİ - ARTIK LİNKİ DOĞRU OKUYACAK)
+# /anketle KOMUTU 
 async def anketle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != 'private': return
     if update.effective_user.id not in ADMIN_IDS: return
 
-    # Regex ile tetiklendiği için mesajı manuel temizliyoruz
     metin = update.message.text
     temiz_args = re.sub(r'(?i)^/anketle(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip()
     
@@ -250,7 +422,6 @@ Soru: [En başa Emoji] [Soru metni]
         options = parsed_options if len(parsed_options) == 5 else ["Haklısın", "Haksızsın", "Umrumda değil"]
 
     except Exception as e:
-        print(f"Anketle AI hatası: {e}")
         await status_msg.edit_text(f"❌ Yapay zeka soruyu üretemedi: {e}")
         return
 
@@ -264,16 +435,10 @@ Soru: [En başa Emoji] [Soru metni]
             safe_options.append(clean_opt + " (Katılıyorum)") 
             
     try:
-        await context.bot.send_poll(
-            chat_id=target_group,
-            question=question_text,
-            options=safe_options,
-            is_anonymous=False 
-        )
+        await context.bot.send_poll(chat_id=target_group, question=question_text, options=safe_options, is_anonymous=False)
         await status_msg.edit_text(f"✅ Anket başarıyla oluşturuldu ve o mesajın ait olduğu gruba gönderildi!\n\nSoru: {question_text}")
     except Exception as e:
         await status_msg.edit_text(f"❌ Gruba anket gönderilemedi!\nTelegram Hatası: `{e}`")
-
 
 # /ama KOMUTU
 async def ama_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -310,18 +475,11 @@ Emoji: [Duruma uygun tek bir emoji]
 
     emoji = "🤔"
     trait = "eski sevgilisiyle hala yakın arkadaş"
-    options = [
-        "Sıkıntı yok güveniyorsam tamam",
-        "Duruma ve karşındakine göre değişir",
-        "Kesinlikle sorun çıkarırım",
-        "Direkt yol veririm",
-        "Böyle saçmalık olmaz amk"
-    ]
+    options = ["Sıkıntı yok güveniyorsam tamam", "Duruma ve karşındakine göre değişir", "Kesinlikle sorun çıkarırım", "Direkt yol veririm", "Böyle saçmalık olmaz amk"]
 
     try:
         res = await client.aio.models.generate_content(
-            model=MODEL_NAME, 
-            contents=prompt,
+            model=MODEL_NAME, contents=prompt,
             config=types.GenerateContentConfig(
                 safety_settings=[
                     types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
@@ -336,20 +494,16 @@ Emoji: [Duruma uygun tek bir emoji]
         parsed_options = []
         
         for line in lines:
-            if line.startswith("Emoji:"):
-                emoji = line.replace("Emoji:", "").strip()
-            elif line.startswith("Özellik:"):
-                trait = line.replace("Özellik:", "").strip()
+            if line.startswith("Emoji:"): emoji = line.replace("Emoji:", "").strip()
+            elif line.startswith("Özellik:"): trait = line.replace("Özellik:", "").strip()
             elif re.match(r'^[1-5][-.)]\s*', line):
                 clean_opt = re.sub(r'^[1-5][-.)]\s*', '', line).strip()
                 clean_opt = clean_opt.replace('*', '') 
                 parsed_options.append(clean_opt)
         
-        if len(parsed_options) == 5:
-            options = parsed_options
+        if len(parsed_options) == 5: options = parsed_options
 
-    except Exception as e:
-        print(f"Ama komutu AI hatası: {e}")
+    except Exception: pass
 
     question_text = f"{emoji} {gender} {score}/10 ama {trait}?"
     question_text = question_text[:290] 
@@ -357,10 +511,8 @@ Emoji: [Duruma uygun tek bir emoji]
     safe_options = []
     for opt in options:
         clean_opt = opt[:95] 
-        if clean_opt not in safe_options:
-            safe_options.append(clean_opt)
-        else:
-            safe_options.append(clean_opt + " (Katılıyorum)") 
+        if clean_opt not in safe_options: safe_options.append(clean_opt)
+        else: safe_options.append(clean_opt + " (Katılıyorum)") 
             
     if len(safe_options) < 2: safe_options = ["Evet", "Hayır"] 
         
@@ -369,35 +521,25 @@ Emoji: [Duruma uygun tek bir emoji]
     
     for group_id in ALLOWED_GROUPS:
         try:
-            await context.bot.send_poll(
-                chat_id=group_id,
-                question=question_text,
-                options=safe_options,
-                is_anonymous=False 
-            )
+            await context.bot.send_poll(chat_id=group_id, question=question_text, options=safe_options, is_anonymous=False)
             success_count += 1
         except Exception as e:
             error_messages.append(f"❌ {group_id} ID'li gruba gönderilemedi.\nTelegram Hatası: `{e}`")
     
-    if success_count > 0:
-        await status_msg.edit_text(f"✅ Soru {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {emoji} {gender} {score}/10 ama {trait}")
-    else:
-        await status_msg.edit_text(f"⚠️ Anket 0 gruba gönderildi! Sorun Telegram tarafından engellendi.\n\nİşte detaylar:\n" + "\n\n".join(error_messages))
+    if success_count > 0: await status_msg.edit_text(f"✅ Soru {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {emoji} {gender} {score}/10 ama {trait}")
+    else: await status_msg.edit_text(f"⚠️ Anket 0 gruba gönderildi! Sorun Telegram tarafından engellendi.\n\nİşte detaylar:\n" + "\n\n".join(error_messages))
 
 
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global IS_UPDATING
     if update.effective_user.id not in ADMIN_IDS: return 
-    
-    if IS_UPDATING:
-        await update.message.reply_text(" Bot şu anda zaten bir güncelleme yapıyor. Lütfen bitmesini bekle.")
+    if IS_UPDATING: await update.message.reply_text(" Bot şu anda zaten bir güncelleme yapıyor. Lütfen bitmesini bekle.")
     else:
         await update.message.reply_text("🔄 Manuel toplu güncelleme başlatıldı.\nHer burç arası 90 saniye bekleniyor.\nİşlem yaklaşık 18 dakika sürecektir.")
         asyncio.create_task(update_all_horoscopes())
 
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
-    
     metin = update.message.text.lower()
     temiz_args = re.sub(r'^/burcyorumla(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip()
     
@@ -412,17 +554,13 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     tz = pytz.timezone("Europe/Istanbul")
     bugun = datetime.datetime.now(tz).strftime("%d-%m-%Y")
-    
     yorum = HOROSCOPE_CACHE.get(burc_input)
 
-    if yorum == "":
-        await update.message.reply_text("🛰️ Yıldızlar henüz uyanmadı. Lütfen yönetici güncellemeyi başlatana kadar veya gece güncellemesi yapılana kadar bekle.")
-    else:
-        await update.message.reply_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
+    if yorum == "": await update.message.reply_text("🛰️ Yıldızlar henüz uyanmadı. Lütfen yönetici güncellemeyi başlatana kadar veya gece güncellemesi yapılana kadar bekle.")
+    else: await update.message.reply_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
 
 async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
-    
     photo_obj = update.message.photo[-1] if update.message.photo else (update.message.reply_to_message.photo[-1] if update.message.reply_to_message and update.message.reply_to_message.photo else None)
     if not photo_obj:
         await update.message.reply_text("☕ Fal için fincan fotosu lazım. Neyim ben mahalle falcısı mı sandın?")
@@ -433,8 +571,7 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_file = await photo_obj.get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
         prompt = "Görseldeki kahve lekelerini somut nesnelere benzeterek dobra ve mistik bir dille yorumla. Klişelerden kaçın. maksimum 150 kelime kullan ve asla yıldız(*) işareti kullanma. Her paragrafın başına içeriğine uygun bir emoji ekle."
         res = await client.aio.models.generate_content(
-            model=MODEL_NAME, 
-            contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")],
+            model=MODEL_NAME, contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")],
             config=types.GenerateContentConfig(
                 safety_settings=[
                     types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
@@ -449,7 +586,6 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
-    
     target = update.message.reply_to_message if update.message.reply_to_message else update.message
     status_msg = await update.message.reply_text("🔄 İnceleniyor...")
     try:
@@ -463,13 +599,11 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
-    
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
     try:
         res = await client.aio.models.generate_content(
-            model=MODEL_NAME, 
-            contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla. maksimum 120 kelime kullan ama asla yıldız işareti(*) kullanma. Her paragrafın başına o paragrafa uygun bir emoji ekle.",
+            model=MODEL_NAME, contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla. maksimum 120 kelime kullan ama asla yıldız işareti(*) kullanma. Her paragrafın başına o paragrafa uygun bir emoji ekle.",
             config=types.GenerateContentConfig(
                 safety_settings=[
                     types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
@@ -482,22 +616,21 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(f"🔮 TAROT FALI:\n\n{res.text}")
     except: await status.edit_text("Tüh bağlantı koptu.")
 
-
 async def main():
     keep_alive()
-    
     asyncio.create_task(background_scheduler())
-    
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
     allowed_filter = filters.Chat(chat_id=ALLOWED_GROUPS) | (filters.ChatType.PRIVATE & filters.User(user_id=ADMIN_IDS))
-    
     interaction_filter = filters.TEXT | filters.COMMAND | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL
     
-    # 1. Filtre: Yetkisiz erişimleri kes
     application.add_handler(MessageHandler(interaction_filter & (~allowed_filter), reject_unauthorized))
     
-    # 2. Komutlar
+    # Yeni eklenen RPG Buton Yakalayıcısı
+    application.add_handler(CallbackQueryHandler(rpg_callback, pattern='^rpg_'))
+    
+    # Komutlar
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/rpg'), rpg_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/update'), update_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ama'), ama_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/getir'), getir_command))
@@ -507,14 +640,12 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/falbak'), falbak_command))
 
-    # 3. Canlı Mesaj Yakalayıcı (Komut değilse, gruptaysa hafızaya alır)
     application.add_handler(MessageHandler(filters.TEXT & (~filters.COMMAND), log_message))
     
     print(f"Zenithar Services Başlatıldı. (Manuel Başlangıç ve 02:00 Oto-Güncelleme)")
     
     await application.initialize(); await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
-    
     while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
