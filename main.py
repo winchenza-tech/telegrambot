@@ -43,7 +43,8 @@ nest_asyncio.apply()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-MODEL_NAME = 'gemini-2.5-flash'
+# Model Gemini 3.0 Flash olarak güncellendi!
+MODEL_NAME = 'gemini-3.0-flash'
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # HAFIZA VE KİLİT SİSTEMİ
@@ -301,11 +302,11 @@ async def run_rpg_game(chat_id, context):
                 else: actions_text += f"{p['name']}: (Hiçbir şey yapmadı, eylemsiz kaldı)\n"
 
         if round_num == 1:
-            prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Katılımcılar: {player_names}. Katılımcıları senaryo içinde farklı konumlara/durumlara yerleştirerek macerayı başlat. Acımasız bir Dungeon Master gibi anlat.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için MAKSİMUM 30 KELİME, katılımcıların ne durumda olduğunu açıklamak için MAKSİMUM 20 KELİME kullan. Çok kısa ve öz ol! Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. Yıldız(*) kullanma."
+            prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Katılımcılar: {player_names}. Katılımcıları senaryo içinde farklı konumlara/durumlara yerleştirerek macerayı başlat. Acımasız ve edebi bir Dungeon Master gibi anlat. Karakterlerin durumunu derinleştirerek hikayeleştir.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir katılımcının durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma."
         elif round_num < 4:
-            prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız hamle yapanları veya 'eylemsiz kaldı' diyenleri vahşice ÖLDÜR. Mantıklı olanları yaşat ve yeni bir ölümcül kriz yarat.\n\nÖNEMLİ KURAL: Ortamdaki yeni krizi açıklamak için MAKSİMUM 30 KELİME, katılımcıların durumunu açıklamak için MAKSİMUM 20 KELİME kullan. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. Yıldız(*) kullanma."
+            prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız hamle yapanları veya 'eylemsiz kaldı' diyenleri vahşice ÖLDÜR. Mantıklı olanları yaşat ve yeni bir ölümcül kriz yarat.\n\nÖNEMLİ KURAL: Ortamdaki yeni krizi ve atmosferi açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir karakterin hamle sonucunu ve yeni durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. ASLA yıldız(*) kullanma."
         else:
-            prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat.\n\nÖNEMLİ KURAL: Finali açıklamak için MAKSİMUM 40 KELİME kullan. Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. Yıldız(*) kullanma."
+            prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat. Karakter durumlarını epik bir dille hikayeleştir.\n\nÖNEMLİ KURAL: Ortamı ve finalin genel sonucunu açıklamak için 30 İLA 40 KELİME ARASI kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. ASLA yıldız(*) kullanma."
             
         try:
             res = await client.aio.models.generate_content(
@@ -322,7 +323,7 @@ async def run_rpg_game(chat_id, context):
             )
             text = res.text
         except Exception as e:
-            await context.bot.send_message(chat_id, f"Sistem hatası: {e}. DM bayıldı, oyun iptal.")
+            await context.bot.send_message(chat_id, f"Sistem hatası: {e}. zenithar'ın suçu yok, yapay zeka bayıldı, oyun iptal.")
             break
 
         display_text = text
@@ -334,8 +335,10 @@ async def run_rpg_game(chat_id, context):
                     dead_line = line
                     break
             
+            # HTML formatlı isimleri düz yazı olarak aramak için tagleri temizle
+            clean_dead_line = dead_line.replace('<b>', '').replace('</b>', '').replace('<strong>', '').replace('</strong>', '')
             for uid, p in players.items():
-                if p["name"].lower() in dead_line.lower() and p["status"] == "alive":
+                if p["name"].lower() in clean_dead_line.lower() and p["status"] == "alive":
                     p["status"] = "dead"
             
             display_text = "\n".join([l for l in lines if not l.upper().startswith("ÖLENLER:")]).strip()
@@ -345,21 +348,19 @@ async def run_rpg_game(chat_id, context):
         
         pts_to_add = round_points.get(round_num, 0)
         
-        # Eğer final turuysa ve 2 kişi hayatta kaldıysa, 40 yerine 70 puan ver
         if round_num == 4 and len(current_alive_after_round) == 2:
             pts_to_add = 70
             
         for uid in current_alive_after_round:
-            # Genel tabloya ekle
             if uid not in RPG_SCORES:
                 RPG_SCORES[uid] = {"name": players[uid]["name"], "score": 0}
             RPG_SCORES[uid]["score"] += pts_to_add
             RPG_SCORES[uid]["name"] = players[uid]["name"]
-            
-            # Bu oyunun skor tablosuna ekle
             game["round_points_log"][uid] += pts_to_add
 
+        # YAPAY ZEKANIN ÜRETTİĞİ <b> İSİM </b> HTML ETİKETLERİNİ GÜVENLİK FİLTRESİNDEN KORU
         display_text = html.escape(display_text)
+        display_text = display_text.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>').replace('&lt;strong&gt;', '<b>').replace('&lt;/strong&gt;', '</b>')
 
         current_alive_formatted = [f"<a href='tg://user?id={uid}'>{players[uid]['name']}</a>" for uid in current_alive_after_round]
         alive_count = len(current_alive_formatted)
@@ -379,7 +380,6 @@ async def run_rpg_game(chat_id, context):
         
         msg_text = f"🎲 <b>TUR {round_num}/4</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 90 saniye. Hamlenizi yapmak için bota ait BU MESAJI YANITLAYIN (Reply)!</i>"
         if round_num == 4:
-            # FİNAL MESAJINA PUAN TABLOSUNU EKLEME
             scoreboard = "\n\n🏆 <b>OYUN SONU PUANLARI:</b>\n"
             for uid, p in players.items():
                 puan = game["round_points_log"].get(uid, 0)
