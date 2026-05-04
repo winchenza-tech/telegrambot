@@ -44,7 +44,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
 # Model Gemini 3.0 Flash olarak güncellendi!
-MODEL_NAME = 'gemini-3.0-flash'
+MODEL_NAME = 'gemini-2.5-flash'
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # HAFIZA VE KİLİT SİSTEMİ
