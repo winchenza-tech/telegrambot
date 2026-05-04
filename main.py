@@ -205,7 +205,7 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id, f"{user.first_name}, zaten katıldın sabret!")
 
 async def run_rpg_game(chat_id, context):
-    await asyncio.sleep(30)
+    await asyncio.sleep(45)
     game = RPG_GAMES.get(chat_id)
     if not game or len(game["players"]) == 0:
         await context.bot.send_message(chat_id, "😢 Kimse katılmadı, RPG oyunu iptal edildi.")
@@ -285,7 +285,7 @@ async def run_rpg_game(chat_id, context):
         
         image_url = f"https://image.pollinations.ai/prompt/{eng_scen}_round_{round_num}?width=800&height=400&nologo=true"
         
-        msg_text = f"🎲 **TUR {round_num}/4**\n\n{display_text}\n\n⏳ *Hamlenizi yapmak için BU MESAJI ALINTILAYIP cevap verin! Süreniz 60 saniye.*"
+        msg_text = f"🎲 TUR {round_num}/4**\n\n{display_text}\n\n⏳ *Hamlenizi yapmak için BU MESAJI ALINTILAYIP cevap verin! Süreniz 60 saniye.*"
         if round_num == 4:
             msg_text = f"🚨 **FİNAL SONUCU**\n\n{display_text}"
 
@@ -297,7 +297,7 @@ async def run_rpg_game(chat_id, context):
         game["last_message_id"] = msg.message_id
         
         if round_num < 4:
-            await asyncio.sleep(60) # Hamleler için 60 saniye bekle
+            await asyncio.sleep(90) # Hamleler için 60 saniye bekle
     
     await asyncio.sleep(2) 
     RPG_GAMES.pop(chat_id, None)
