@@ -181,23 +181,45 @@ async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔄 Manuel toplu güncelleme başlatıldı.\nHer burç arası 90 saniye bekleniyor.\nİşlem yaklaşık 18 dakika sürecektir.")
         asyncio.create_task(update_all_horoscopes())
 
-# 👑 YENİ ADMİN ÖZEL KOMUT (Anket - /ama) - YAPAY ZEKA DESTEKLİ DİNAMİK ÜRETİM
+# 👑 YENİ ADMİN ÖZEL KOMUT (Anket - /ama) - DİNAMİK YAPAY ZEKA DESTEĞİ VE MANTIKLI SEÇENEKLER
 async def ama_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != 'private': return
     if update.effective_user.id not in ADMIN_IDS: return
 
-    # Cinsiyet ve olasılık belirleme
     gender = random.choice(['Çocuk', 'Kız'])
-    is_high_score = random.random() < 0.60 # %60 ihtimalle yüksek puan (>7)
+    is_high_score = random.random() < 0.60 
 
-    status_msg = await update.message.reply_text("🤔 Anket sorusu yapay zeka tarafından yaratılıyor...")
+    status_msg = await update.message.reply_text("🤔 Anket sorusu ve mantıklı seçenekler yaratılıyor...")
 
-    if is_high_score:
-        score = random.randint(8, 10)
-        prompt = f"Bir {gender.lower()} düşün. Dış görünüşü {score}/10 (çok iyi) ama çok absürt, komik veya biraz itici bir huyu var. Cümle '{gender} {score}/10 ama...' diye başlıyor. Sen sadece 'ama'dan sonraki huyu yaz. Asla başka bir kelime, açıklama veya sonuna nokta kullanma. Maksimum 5-6 kelime. Örnek: yerlere tükürüyor, altına işiyor, sadece kızlarla arkadaş, sürekli ağlıyor, tırnaklarını yiyor."
-    else:
-        score = random.randint(1, 7)
-        prompt = f"Bir {gender.lower()} düşün. Dış görünüşü {score}/10 (düşük/ortalama) ama çok spesifik, komik veya şaşırtıcı derecede olumlu/ilginç bir özelliği var. Cümle '{gender} {score}/10 ama...' diye başlıyor. Sen sadece 'ama'dan sonraki özelliği yaz. Asla başka bir kelime, açıklama veya sonuna nokta kullanma. Maksimum 5-6 kelime. Örnek: kısmetse olur izliyor, çok sadık, harika yemek yapıyor, hesabını kendi ödüyor."
+    score = random.randint(8, 10) if is_high_score else random.randint(1, 7)
+
+    prompt = f"""Bir {gender.lower()} düşün. Dış görünüşü {score}/10. Buna gerçekçi ama fikir ayrılığı yaratacak, tartışmalı bir huy/özellik ekle.
+Puan yüksekse (8-10) özellik itici veya zorlayıcı olsun (red flag). Puan düşükse (1-7) özellik cazip veya durumu kurtaran bir şey olsun (green flag).
+Sadece 'ama'dan sonraki kısmı yazacaksın. Uçuk kaçık fantastik veya çok saçma şeyler olmasın (örnek: ağzında bozuk para biriktiriyor GİBİ OLAMAZ). İkili ilişkilerde insanların gerçekten tartışıp kafa yoracağı durumlar olsun (örnek: eski sevgilisiyle hala yakın arkadaş, hesabı asla ödemiyor, annesinin sözünden çıkmıyor).
+
+Ayrıca bu duruma insanların verebileceği 5 farklı anketi şıkkını yaz. 
+ŞARTLAR:
+1. Şıklarda KESİNLİKLE emoji KULLANMA. Sadece düz metin olsun.
+2. Şıklar oluşturduğun bu spesifik duruma tam uygun olsun.
+3. Olumsuz veya sinirli şıklarda 'amk' kelimesini kullanabilirsin.
+
+Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
+Özellik: [Sadece ama'dan sonraki kısım]
+1- [Şık 1]
+2- [Şık 2]
+3- [Şık 3]
+4- [Şık 4]
+5- [Şık 5]"""
+
+    # Varsayılan değerler (API hata verirse patlamasın diye)
+    trait = "eski sevgilisiyle hala yakın arkadaş"
+    options = [
+        "Sıkıntı yok güveniyorsam tamam",
+        "Duruma ve kıza/çocuğa göre değişir",
+        "Kesinlikle sorun çıkarırım",
+        "Direkt yol veririm",
+        "Böyle saçmalık olmaz amk"
+    ]
 
     try:
         res = await client.aio.models.generate_content(
@@ -212,25 +234,28 @@ async def ama_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             )
         )
-        # Yapay zekadan gelen metni temizle (başındaki/sonundaki boşlukları ve noktaları sil)
-        trait = res.text.strip().lower()
-        trait = re.sub(r'^\.+|\.+$', '', trait).strip()
+        
+        # Yanıtı ayrıştırma
+        lines = [line.strip() for line in res.text.strip().split('\n') if line.strip()]
+        parsed_options = []
+        
+        for line in lines:
+            if line.startswith("Özellik:"):
+                trait = line.replace("Özellik:", "").strip()
+            elif re.match(r'^[1-5][-.)]\s*', line):
+                clean_opt = re.sub(r'^[1-5][-.)]\s*', '', line).strip()
+                clean_opt = clean_opt.replace('*', '') # Bold işaretlerini temizle
+                parsed_options.append(clean_opt)
+        
+        if len(parsed_options) == 5:
+            options = parsed_options
+
     except Exception as e:
-        # API Hata verirse veya yanıt alamazsa varsayılan bir tane seç (Güvenlik ağı)
-        trait = "sürekli uyuyor"
-        print(f"Ama komutu AI hatası: {e}")
+        print(f"Ama komutu AI hatası veya Parse hatası: {e}")
 
-    question_text = f"🧪 Beta Özellik | {gender} {score}/10 ama {trait} 🤔"
+    # Soru Formatı: Başlık ve Soru
+    question_text = f"🧪 Beta Özellik\n\n{gender} {score}/10 ama {trait}?"
     
-    # 5 şıklı eğlenceli anket seçenekleri
-    options = [
-        "Kesinlikle nikahı basarım! 😍💍",
-        "Bir şans verilir... Görmezden gelinir 🤔",
-        "Arkadaş kalalım biz kanka 😬",
-        "Asla! Anında engellerim 🏃‍♂️💨",
-        "Önce bir tedavi görsün 🏥"
-    ]
-
     success_count = 0
     for group_id in ALLOWED_GROUPS:
         try:
@@ -244,7 +269,7 @@ async def ama_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"Anket {group_id} grubuna gönderilemedi: {e}")
     
-    await status_msg.edit_text(f"✅ Soru üretildi ve {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {question_text}")
+    await status_msg.edit_text(f"✅ Soru üretildi ve {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {gender} {score}/10 ama {trait}")
 
 
 # ✨ BURÇ KOMUTU
