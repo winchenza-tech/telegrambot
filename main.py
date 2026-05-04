@@ -46,13 +46,15 @@ GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 MODEL_NAME = 'gemini-2.5-flash'
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
-# HAFIZA VE KİLİT SİSTEMİ
+# HAFIZA, KİLİT VE GÖREV (TASK) SİSTEMİ
 VALID_ZODIACS = [
     "koc", "boga", "ikizler", "yengec", "aslan", "basak", 
     "terazi", "akrep", "yay", "oglak", "kova", "balik"
 ]
 HOROSCOPE_CACHE = {burc: "" for burc in VALID_ZODIACS}
 IS_UPDATING = False 
+
+BACKGROUND_TASKS = set() # Python'ın görevleri silmesini önleyen kilit kasa
 
 TAROT_CARDS = [
     "Deli", "Büyücü", "Azize", "İmparatoriçe", "İmparator", "Aziz",
@@ -71,7 +73,6 @@ RPG_SCORES = {}
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 
-# 503 HATALARINA KARŞI DİRENÇ MOTORU (YENİ EKLENDİ)
 async def safe_generate(contents, config=None, retries=3):
     for attempt in range(retries):
         try:
@@ -82,8 +83,8 @@ async def safe_generate(contents, config=None, retries=3):
             )
         except Exception as e:
             if attempt == retries - 1:
-                raise e # Son denemede de hata verirse pes et
-            await asyncio.sleep(2) # Hata durumunda 2 saniye bekle, tekrar dene
+                raise e 
+            await asyncio.sleep(2) 
 
 def turkce_karakter_duzelt(metin):
     metin = metin.lower().strip()
@@ -257,7 +258,10 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("🙋‍♂️ Oyuna Katıl", callback_data="rpg_join")]]
         await query.edit_message_text(f"🎬 Senaryo: {scenario} seçildi!\n\nOyuna katılmak için aşağıdaki butona basın. Macera 60 saniye sonra başlayacak!", reply_markup=InlineKeyboardMarkup(keyboard))
         
-        asyncio.create_task(run_rpg_game(chat_id, context))
+        # Görevi arka plana atarken Garbage Collector silmesin diye kasaya (Set) ekliyoruz
+        task = asyncio.create_task(run_rpg_game(chat_id, context))
+        BACKGROUND_TASKS.add(task)
+        task.add_done_callback(BACKGROUND_TASKS.discard)
         
     elif data == "rpg_join":
         if chat_id in RPG_GAMES and RPG_GAMES[chat_id]["status"] == "waiting_players":
@@ -273,140 +277,152 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await context.bot.send_message(chat_id, f"{user.first_name}, zaten katıldın sabret!")
 
 async def run_rpg_game(chat_id, context):
-    await asyncio.sleep(60) 
-    game = RPG_GAMES.get(chat_id)
-    if not game or len(game["players"]) == 0:
-        await context.bot.send_message(chat_id, "😢 Kimse katılmadı, RPG oyunu iptal edildi.")
-        RPG_GAMES.pop(chat_id, None)
-        return
-        
-    game["status"] = "playing"
-    players = game["players"]
-    scenario = game["scenario"]
-    
-    scenario_desc = scenario
-    if "Arınma" in scenario:
-        scenario_desc = "Arınma Gecesi (Herkesin birbirini acımasızca avladığı, yasanın olmadığı, kıyamet benzeri ölümcül bir gece)"
-    
-    player_names = ", ".join([p["name"] for p in players.values()])
-    
-    round_points = {1: 10, 2: 20, 3: 30, 4: 40}
-    
-    for round_num in range(1, 5):
-        game["round"] = round_num
-        game["recorded_actions"] = [] 
-        
-        for uid in players: players[uid]["action"] = None
+    try:
+        await asyncio.sleep(60) 
+        game = RPG_GAMES.get(chat_id)
+        if not game or len(game["players"]) == 0:
+            await context.bot.send_message(chat_id, "😢 Kimse katılmadı, RPG oyunu iptal edildi.")
+            RPG_GAMES.pop(chat_id, None)
+            return
             
-        alive_players = [p for p in players.values() if p["status"] == "alive"]
-        if len(alive_players) == 0:
-            await context.bot.send_message(chat_id, "💀 <b>Oyun Bitti!</b> Herkes öldü... Kimse hayatta kalamadı.", parse_mode="HTML")
-            break
-            
-        actions_text = ""
-        if round_num > 1:
-            for p in alive_players:
-                if p["action"]: actions_text += f"{p['name']}: {p['action']}\n"
-                else: actions_text += f"{p['name']}: (Hiçbir şey yapmadı, eylemsiz kaldı)\n"
-
-        if round_num == 1:
-            prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Katılımcılar: {player_names}. Katılımcıları senaryo içinde farklı konumlara/durumlara yerleştirerek macerayı başlat. Acımasız ve edebi bir Dungeon Master gibi anlat. Karakterlerin durumunu derinleştirerek hikayeleştir.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir katılımcının durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma."
-        elif round_num < 4:
-            prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız hamle yapanları veya 'eylemsiz kaldı' diyenleri vahşice ÖLDÜR. Mantıklı olanları yaşat ve yeni bir ölümcül kriz yarat.\n\nÖNEMLİ KURAL: Ortamdaki yeni krizi ve atmosferi açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir karakterin hamle sonucunu ve yeni durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. ASLA yıldız(*) kullanma."
-        else:
-            prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat. Karakter durumlarını epik bir dille hikayeleştir.\n\nÖNEMLİ KURAL: Ortamı ve finalin genel sonucunu açıklamak için 30 İLA 40 KELİME ARASI kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. ASLA yıldız(*) kullanma."
-            
-        try:
-            res = await safe_generate(
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    safety_settings=[
-                        types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
-                        types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
-                        types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
-                        types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
-                    ]
-                )
-            )
-            text = res.text
-        except Exception as e:
-            await context.bot.send_message(chat_id, f"Sistem hatası (Yoğunluk): DM bayıldı, oyun iptal.")
-            break
-
-        display_text = text
-        if "ÖLENLER:" in text.upper():
-            lines = text.split('\n')
-            dead_line = ""
-            for line in lines:
-                if line.upper().startswith("ÖLENLER:"):
-                    dead_line = line
-                    break
-            
-            clean_dead_line = dead_line.replace('<b>', '').replace('</b>', '').replace('<strong>', '').replace('</strong>', '')
-            for uid, p in players.items():
-                if p["name"].lower() in clean_dead_line.lower() and p["status"] == "alive":
-                    p["status"] = "dead"
-            
-            display_text = "\n".join([l for l in lines if not l.upper().startswith("ÖLENLER:")]).strip()
-
-        current_alive_after_round = [uid for uid, p in players.items() if p["status"] == "alive"]
-        pts_to_add = round_points.get(round_num, 0)
+        game["status"] = "playing"
+        players = game["players"]
+        scenario = game["scenario"]
         
-        if round_num == 4 and len(current_alive_after_round) == 2:
-            pts_to_add = 70
+        scenario_desc = scenario
+        if "Arınma" in scenario:
+            scenario_desc = "Arınma Gecesi (Herkesin birbirini acımasızca avladığı, yasanın olmadığı, kıyamet benzeri ölümcül bir gece)"
+        
+        player_names = ", ".join([p["name"] for p in players.values()])
+        
+        round_points = {1: 10, 2: 20, 3: 30, 4: 40}
+        
+        for round_num in range(1, 5):
+            game["round"] = round_num
+            game["recorded_actions"] = [] 
             
-        for uid in current_alive_after_round:
-            if uid not in RPG_SCORES:
-                RPG_SCORES[uid] = {"name": players[uid]["name"], "score": 0}
-            RPG_SCORES[uid]["score"] += pts_to_add
-            RPG_SCORES[uid]["name"] = players[uid]["name"]
-            game["round_points_log"][uid] += pts_to_add
-
-        display_text = html.escape(display_text)
-        display_text = display_text.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>').replace('&lt;strong&gt;', '<b>').replace('&lt;/strong&gt;', '</b>')
-
-        current_alive_formatted = [f"<a href='tg://user?id={uid}'>{players[uid]['name']}</a>" for uid in current_alive_after_round]
-        alive_count = len(current_alive_formatted)
-        
-        alive_tags_text = "🟢 <b>Hayatta Kalanlar:</b> " + ", ".join(current_alive_formatted) if current_alive_formatted else "💀 Herkes öldü..."
-        if round_num >= 2 and alive_count > 0:
-            alive_tags_text += f"\n👥 <b>Hayatta Kalan:</b> {alive_count}"
-
-        eng_scen = "rpg_game_scene"
-        if "Zombi" in scenario: eng_scen = "zombie_apocalypse_survival"
-        elif "Ada" in scenario: eng_scen = "deserted_island_survival"
-        elif "Mağara" in scenario: eng_scen = "creepy_dark_cave"
-        elif "Kıyamet" in scenario: eng_scen = "post_apocalyptic_wasteland"
-        elif "Arınma" in scenario: eng_scen = "purge_anarchy_street"
-        
-        image_url = f"https://image.pollinations.ai/prompt/{eng_scen}_round_{round_num}?width=800&height=400&nologo=true"
-        
-        msg_text = f"🎲 <b>TUR {round_num}/4</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 90 saniye. Hamlenizi yapmak için bota ait BU MESAJI YANITLAYIN (Reply)!</i>"
-        if round_num == 4:
-            scoreboard = "\n\n🏆 <b>OYUN SONU PUANLARI:</b>\n"
-            for uid, p in players.items():
-                puan = game["round_points_log"].get(uid, 0)
-                durum = "🎉 Kazandı!" if p["status"] == "alive" else "💀 Öldü"
-                scoreboard += f"- {html.escape(p['name'])}: +{puan} Puan ({durum})\n"
+            for uid in players: players[uid]["action"] = None
                 
-            msg_text = f"🚨 <b>FİNAL SONUCU</b>\n\n{display_text}\n\n{alive_tags_text}{scoreboard}"
+            alive_players = [p for p in players.values() if p["status"] == "alive"]
+            if len(alive_players) == 0:
+                await context.bot.send_message(chat_id, "💀 <b>Oyun Bitti!</b> Herkes öldü... Kimse hayatta kalamadı.", parse_mode="HTML")
+                break
+                
+            actions_text = ""
+            if round_num > 1:
+                for p in alive_players:
+                    if p["action"]: actions_text += f"{p['name']}: {p['action']}\n"
+                    else: actions_text += f"{p['name']}: (Hiçbir şey yapmadı, eylemsiz kaldı)\n"
 
-        game["current_caption"] = msg_text
+            if round_num == 1:
+                prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Katılımcılar: {player_names}. Katılımcıları senaryo içinde farklı konumlara/durumlara yerleştirerek macerayı başlat. Acımasız ve edebi bir Dungeon Master gibi anlat. Karakterlerin durumunu derinleştirerek hikayeleştir.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir katılımcının durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma."
+            elif round_num < 4:
+                prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız hamle yapanları veya 'eylemsiz kaldı' diyenleri vahşice ÖLDÜR. Mantıklı olanları yaşat ve yeni bir ölümcül kriz yarat.\n\nÖNEMLİ KURAL: Ortamdaki yeni krizi ve atmosferi açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir karakterin hamle sonucunu ve yeni durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. ASLA yıldız(*) kullanma."
+            else:
+                prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat. Karakter durumlarını epik bir dille hikayeleştir.\n\nÖNEMLİ KURAL: Ortamı ve finalin genel sonucunu açıklamak için 30 İLA 40 KELİME ARASI kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. ASLA yıldız(*) kullanma."
+                
+            try:
+                res = await safe_generate(
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        safety_settings=[
+                            types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+                            types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+                            types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+                            types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
+                        ]
+                    )
+                )
+                text = res.text
+            except Exception as e:
+                await context.bot.send_message(chat_id, f"Sistem hatası (Yoğunluk): DM bayıldı, oyun iptal.")
+                break
 
-        try:
-            msg = await context.bot.send_photo(chat_id, photo=image_url, caption=msg_text, parse_mode='HTML')
-            game["is_photo_msg"] = True
-        except:
-            msg = await context.bot.send_message(chat_id, msg_text, parse_mode='HTML')
-            game["is_photo_msg"] = False
+            display_text = text
+            if "ÖLENLER:" in text.upper():
+                lines = text.split('\n')
+                dead_line = ""
+                for line in lines:
+                    if line.upper().startswith("ÖLENLER:"):
+                        dead_line = line
+                        break
+                
+                clean_dead_line = dead_line.replace('<b>', '').replace('</b>', '').replace('<strong>', '').replace('</strong>', '')
+                for uid, p in players.items():
+                    if p["name"].lower() in clean_dead_line.lower() and p["status"] == "alive":
+                        p["status"] = "dead"
+                
+                display_text = "\n".join([l for l in lines if not l.upper().startswith("ÖLENLER:")]).strip()
+
+            current_alive_after_round = [uid for uid, p in players.items() if p["status"] == "alive"]
+            pts_to_add = round_points.get(round_num, 0)
             
-        game["last_message_id"] = msg.message_id
+            if round_num == 4 and len(current_alive_after_round) == 2:
+                pts_to_add = 70
+                
+            for uid in current_alive_after_round:
+                if uid not in RPG_SCORES:
+                    RPG_SCORES[uid] = {"name": players[uid]["name"], "score": 0}
+                RPG_SCORES[uid]["score"] += pts_to_add
+                RPG_SCORES[uid]["name"] = players[uid]["name"]
+                game["round_points_log"][uid] += pts_to_add
+
+            display_text = html.escape(display_text)
+            display_text = display_text.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>').replace('&lt;strong&gt;', '<b>').replace('&lt;/strong&gt;', '</b>')
+
+            current_alive_formatted = [f"<a href='tg://user?id={uid}'>{html.escape(players[uid]['name'])}</a>" for uid in current_alive_after_round]
+            alive_count = len(current_alive_formatted)
+            
+            alive_tags_text = "🟢 <b>Hayatta Kalanlar:</b> " + ", ".join(current_alive_formatted) if current_alive_formatted else "💀 Herkes öldü..."
+            if round_num >= 2 and alive_count > 0:
+                alive_tags_text += f"\n👥 <b>Hayatta Kalan:</b> {alive_count}"
+
+            eng_scen = "rpg_game_scene"
+            if "Zombi" in scenario: eng_scen = "zombie_apocalypse_survival"
+            elif "Ada" in scenario: eng_scen = "deserted_island_survival"
+            elif "Mağara" in scenario: eng_scen = "creepy_dark_cave"
+            elif "Kıyamet" in scenario: eng_scen = "post_apocalyptic_wasteland"
+            elif "Arınma" in scenario: eng_scen = "purge_anarchy_street"
+            
+            image_url = f"https://image.pollinations.ai/prompt/{eng_scen}_round_{round_num}?width=800&height=400&nologo=true"
+            
+            msg_text = f"🎲 <b>TUR {round_num}/4</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 90 saniye. Hamlenizi yapmak için bota ait BU MESAJI YANITLAYIN (Reply)!</i>"
+            if round_num == 4:
+                scoreboard = "\n\n🏆 <b>OYUN SONU PUANLARI:</b>\n"
+                for uid, p in players.items():
+                    puan = game["round_points_log"].get(uid, 0)
+                    durum = "🎉 Kazandı!" if p["status"] == "alive" else "💀 Öldü"
+                    scoreboard += f"- {html.escape(p['name'])}: +{puan} Puan ({durum})\n"
+                    
+                msg_text = f"🚨 <b>FİNAL SONUCU</b>\n\n{display_text}\n\n{alive_tags_text}{scoreboard}"
+
+            game["current_caption"] = msg_text
+
+            # Zırhlı Gönderim: HTML etiketleri bozuksa bot çökmesin diye fallback mekanizması eklendi
+            try:
+                msg = await context.bot.send_photo(chat_id, photo=image_url, caption=msg_text, parse_mode='HTML')
+                game["is_photo_msg"] = True
+            except Exception:
+                try:
+                    msg = await context.bot.send_message(chat_id, msg_text, parse_mode='HTML')
+                    game["is_photo_msg"] = False
+                except Exception:
+                    safe_text = msg_text.replace('<b>', '').replace('</b>', '').replace('<i>', '').replace('</i>', '')
+                    msg = await context.bot.send_message(chat_id, "⚠️ (HTML Koruması Devrede)\n\n" + safe_text)
+                    game["is_photo_msg"] = False
+                
+            game["last_message_id"] = msg.message_id
+            
+            if round_num < 4:
+                await asyncio.sleep(90) 
         
-        if round_num < 4:
-            await asyncio.sleep(90) 
-    
-    await asyncio.sleep(2) 
-    RPG_GAMES.pop(chat_id, None)
+        await asyncio.sleep(2) 
+        RPG_GAMES.pop(chat_id, None)
+        
+    except Exception as e:
+        print(f"Kritik Oyun Hatası: {e}")
+        await context.bot.send_message(chat_id, f"⚠️ Oyun motorunda kritik bir hata oluştu ve oyun iptal edildi.\nHata detayı: {e}")
+        RPG_GAMES.pop(chat_id, None)
 
 # CANLI MESAJ YAKALAYICI
 async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
