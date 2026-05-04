@@ -8,7 +8,7 @@ import nest_asyncio
 import datetime
 import pytz
 import html 
-import json # Puan yedekleme için eklendi
+import json 
 from collections import deque 
 from flask import Flask
 from threading import Thread
@@ -43,7 +43,6 @@ nest_asyncio.apply()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-# Model tekrar stabil sürüm olan Gemini 2.5 Flash'a döndürüldü!
 MODEL_NAME = 'gemini-2.5-flash'
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
@@ -68,9 +67,23 @@ MESSAGE_LOOKUP = {}
 
 # --- RPG OYUN DURUMU VE PUAN TABLOSU ---
 RPG_GAMES = {}
-RPG_SCORES = {} # Puan tablosu hafızası { user_id: {"name": "isim", "score": 100} }
+RPG_SCORES = {} 
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
+
+# 503 HATALARINA KARŞI DİRENÇ MOTORU (YENİ EKLENDİ)
+async def safe_generate(contents, config=None, retries=3):
+    for attempt in range(retries):
+        try:
+            return await client.aio.models.generate_content(
+                model=MODEL_NAME, 
+                contents=contents,
+                config=config
+            )
+        except Exception as e:
+            if attempt == retries - 1:
+                raise e # Son denemede de hata verirse pes et
+            await asyncio.sleep(2) # Hata durumunda 2 saniye bekle, tekrar dene
 
 def turkce_karakter_duzelt(metin):
     metin = metin.lower().strip()
@@ -112,21 +125,18 @@ async def update_all_horoscopes():
     try:
         for burc in VALID_ZODIACS:
             success = False
-            retry_count = 0
             while not success:
                 try:
                     prompt = (f"Bugün {bugun}. {burc} burcu için internetten en güncel astrolojik gelişmeleri bul. "
                               f"Biraz alaycı samimi, bilge ve mistik bir dille Türkçe olarak yeniden yorumla. Maks 135 kelime kullan. "
                               f"Bu prompt hakkında bilgi verme. yani elbette tamam gibi şeyler söyleme sadece alaycı ve gizemli astrolog yorumunu yaz. Biraz espri katabilirsin. 2 paragraf şeklinde yaz Asla yıldız (*) simgesi kullanma. Her paragrafın başına o paragrafa uygun bir emoji ekle.")
-                    res = await client.aio.models.generate_content(
-                        model=MODEL_NAME, 
+                    res = await safe_generate(
                         contents=prompt,
                         config=types.GenerateContentConfig(tools=[types.Tool(google_search=types.GoogleSearch())])
                     )
                     HOROSCOPE_CACHE[burc] = res.text
                     success = True 
                 except Exception as e:
-                    retry_count += 1
                     if HOROSCOPE_CACHE[burc] == "":
                         HOROSCOPE_CACHE[burc] = "Şu anda tüm zenithar yıldızlara bakarak sigara içiyor 5 dakika sonra tekrar dene."
                     await asyncio.sleep(90) 
@@ -190,7 +200,6 @@ async def puanla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         global RPG_SCORES
         loaded = json.loads(temiz_args)
-        # JSON keyleri string yaptığı için geri int formatına çeviriyoruz
         RPG_SCORES = {int(k): v for k, v in loaded.items()}
         await update.message.reply_text("✅ Puan tablosu başarıyla geri yüklendi!")
     except Exception as e:
@@ -242,7 +251,7 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "current_caption": "",
             "recorded_actions": [],
             "is_photo_msg": False,
-            "round_points_log": {} # O oyunda kazanılan puanları takip etmek için
+            "round_points_log": {} 
         }
         
         keyboard = [[InlineKeyboardButton("🙋‍♂️ Oyuna Katıl", callback_data="rpg_join")]]
@@ -258,14 +267,13 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     "status": "alive",
                     "action": None
                 }
-                # Log için de hazırlık yap
                 RPG_GAMES[chat_id]["round_points_log"][user.id] = 0
                 await context.bot.send_message(chat_id, f"✅ {user.first_name} oyuna katıldı!")
             else:
                 await context.bot.send_message(chat_id, f"{user.first_name}, zaten katıldın sabret!")
 
 async def run_rpg_game(chat_id, context):
-    await asyncio.sleep(60) # KATILIM SÜRESİ 60 SANİYE
+    await asyncio.sleep(60) 
     game = RPG_GAMES.get(chat_id)
     if not game or len(game["players"]) == 0:
         await context.bot.send_message(chat_id, "😢 Kimse katılmadı, RPG oyunu iptal edildi.")
@@ -309,8 +317,7 @@ async def run_rpg_game(chat_id, context):
             prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat. Karakter durumlarını epik bir dille hikayeleştir.\n\nÖNEMLİ KURAL: Ortamı ve finalin genel sonucunu açıklamak için 30 İLA 40 KELİME ARASI kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. ASLA yıldız(*) kullanma."
             
         try:
-            res = await client.aio.models.generate_content(
-                model=MODEL_NAME, 
+            res = await safe_generate(
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     safety_settings=[
@@ -323,7 +330,7 @@ async def run_rpg_game(chat_id, context):
             )
             text = res.text
         except Exception as e:
-            await context.bot.send_message(chat_id, f"Sistem hatası: {e}. DM bayıldı, oyun iptal.")
+            await context.bot.send_message(chat_id, f"Sistem hatası (Yoğunluk): DM bayıldı, oyun iptal.")
             break
 
         display_text = text
@@ -335,7 +342,6 @@ async def run_rpg_game(chat_id, context):
                     dead_line = line
                     break
             
-            # HTML formatlı isimleri düz yazı olarak aramak için tagleri temizle
             clean_dead_line = dead_line.replace('<b>', '').replace('</b>', '').replace('<strong>', '').replace('</strong>', '')
             for uid, p in players.items():
                 if p["name"].lower() in clean_dead_line.lower() and p["status"] == "alive":
@@ -343,9 +349,7 @@ async def run_rpg_game(chat_id, context):
             
             display_text = "\n".join([l for l in lines if not l.upper().startswith("ÖLENLER:")]).strip()
 
-        # PUANLAMA İŞLEMİ VE 2 KİŞİ KAZANMA DURUMU
         current_alive_after_round = [uid for uid, p in players.items() if p["status"] == "alive"]
-        
         pts_to_add = round_points.get(round_num, 0)
         
         if round_num == 4 and len(current_alive_after_round) == 2:
@@ -358,7 +362,6 @@ async def run_rpg_game(chat_id, context):
             RPG_SCORES[uid]["name"] = players[uid]["name"]
             game["round_points_log"][uid] += pts_to_add
 
-        # YAPAY ZEKANIN ÜRETTİĞİ <b> İSİM </b> HTML ETİKETLERİNİ GÜVENLİK FİLTRESİNDEN KORU
         display_text = html.escape(display_text)
         display_text = display_text.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>').replace('&lt;strong&gt;', '<b>').replace('&lt;/strong&gt;', '</b>')
 
@@ -400,7 +403,7 @@ async def run_rpg_game(chat_id, context):
         game["last_message_id"] = msg.message_id
         
         if round_num < 4:
-            await asyncio.sleep(90) # OKUMA VE CEVAP YAZMA SÜRESİ 90 SANİYE
+            await asyncio.sleep(90) 
     
     await asyncio.sleep(2) 
     RPG_GAMES.pop(chat_id, None)
@@ -413,7 +416,6 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if chat_id in ALLOWED_GROUPS:
         msg = update.effective_message
         
-        # 1. RPG Oyunu Hamle Kontrolü
         if chat_id in RPG_GAMES and RPG_GAMES[chat_id]["status"] == "playing":
             game = RPG_GAMES[chat_id]
             if msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id:
@@ -435,7 +437,6 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                             pass 
                         return 
 
-        # 2. Son 10 Mesaj Hafızası
         text = msg.text or msg.caption
         if text: 
             msg_id = msg.message_id
@@ -509,8 +510,7 @@ Soru: [En başa Emoji] [Soru metni]
 5- [Şık 5]"""
 
     try:
-        res = await client.aio.models.generate_content(
-            model=MODEL_NAME, 
+        res = await safe_generate(
             contents=prompt,
             config=types.GenerateContentConfig(
                 safety_settings=[
@@ -537,7 +537,7 @@ Soru: [En başa Emoji] [Soru metni]
         options = parsed_options if len(parsed_options) == 5 else ["Haklısın", "Haksızsın", "Umrumda değil"]
 
     except Exception as e:
-        await status_msg.edit_text(f"❌ Yapay zeka soruyu üretemedi: {e}")
+        await status_msg.edit_text(f"❌ Yapay zeka soruyu üretemedi (Yoğunluk Olabilir): {e}")
         return
 
     question_text = question_text[:290] 
@@ -593,8 +593,8 @@ Emoji: [Duruma uygun tek bir emoji]
     options = ["Sıkıntı yok güveniyorsam tamam", "Duruma ve karşındakine göre değişir", "Kesinlikle sorun çıkarırım", "Direkt yol veririm", "Böyle saçmalık olmaz amk"]
 
     try:
-        res = await client.aio.models.generate_content(
-            model=MODEL_NAME, contents=prompt,
+        res = await safe_generate(
+            contents=prompt,
             config=types.GenerateContentConfig(
                 safety_settings=[
                     types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
@@ -685,8 +685,8 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         photo_file = await photo_obj.get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
         prompt = "Görseldeki kahve lekelerini somut nesnelere benzeterek dobra ve mistik bir dille yorumla. Klişelerden kaçın. maksimum 150 kelime kullan ve asla yıldız(*) işareti kullanma. Her paragrafın başına içeriğine uygun bir emoji ekle."
-        res = await client.aio.models.generate_content(
-            model=MODEL_NAME, contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")],
+        res = await safe_generate(
+            contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")],
             config=types.GenerateContentConfig(
                 safety_settings=[
                     types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
@@ -697,7 +697,7 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         )
         await status_msg.edit_text(f"☕ Zenithar Falcı Teyze:\n\n{res.text}")
-    except: await status_msg.edit_text("⚠️ Fincanı okuyamadım.")
+    except: await status_msg.edit_text("⚠️ Fincanı okuyamadım (Sistem yoğun).")
 
 async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
@@ -706,19 +706,19 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         if target.photo:
             photo_file = await target.photo[-1].get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
-            res = await client.aio.models.generate_content(model=MODEL_NAME, contents=["Bu resmi Türkçe özetle.", types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
+            res = await safe_generate(contents=["Bu resmi Türkçe özetle.", types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")])
         else:
-            res = await client.aio.models.generate_content(model=MODEL_NAME, contents=f"Özetle: {target.text or target.caption}")
+            res = await safe_generate(contents=f"Özetle: {target.text or target.caption}")
         await status_msg.edit_text(f"📝 ÖZET:\n\n{res.text}")
-    except: await status_msg.edit_text("❌ Hata.")
+    except: await status_msg.edit_text("❌ Hata (Sistem yoğun).")
 
 async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
     try:
-        res = await client.aio.models.generate_content(
-            model=MODEL_NAME, contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla. maksimum 120 kelime kullan ama asla yıldız işareti(*) kullanma. Her paragrafın başına o paragrafa uygun bir emoji ekle.",
+        res = await safe_generate(
+            contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla. maksimum 120 kelime kullan ama asla yıldız işareti(*) kullanma. Her paragrafın başına o paragrafa uygun bir emoji ekle.",
             config=types.GenerateContentConfig(
                 safety_settings=[
                     types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
@@ -729,7 +729,7 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         )
         await status.edit_text(f"🔮 TAROT FALI:\n\n{res.text}")
-    except: await status.edit_text("Tüh bağlantı koptu.")
+    except: await status.edit_text("Tüh bağlantı koptu (Sistem yoğun).")
 
 async def main():
     keep_alive()
