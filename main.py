@@ -54,7 +54,7 @@ VALID_ZODIACS = [
 HOROSCOPE_CACHE = {burc: "" for burc in VALID_ZODIACS}
 IS_UPDATING = False 
 
-BACKGROUND_TASKS = set() # Python'ın görevleri silmesini önleyen kilit kasa
+BACKGROUND_TASKS = set() 
 
 TAROT_CARDS = [
     "Deli", "Büyücü", "Azize", "İmparatoriçe", "İmparator", "Aziz",
@@ -73,18 +73,22 @@ RPG_SCORES = {}
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 
-async def safe_generate(contents, config=None, retries=3):
+# GÜÇLENDİRİLMİŞ 503 VE GÜVENLİK DİRENÇ MOTORU
+async def safe_generate(contents, config=None, retries=5):
     for attempt in range(retries):
         try:
-            return await client.aio.models.generate_content(
+            res = await client.aio.models.generate_content(
                 model=MODEL_NAME, 
                 contents=contents,
                 config=config
             )
+            # Yanıtın Google güvenlik duvarına çarpıp çarpmadığını (boş dönüp dönmediğini) test et
+            _ = res.text 
+            return res
         except Exception as e:
             if attempt == retries - 1:
                 raise e 
-            await asyncio.sleep(2) 
+            await asyncio.sleep(5) # Süre 5 saniyeye, deneme sayısı 5'e çıkarıldı.
 
 def turkce_karakter_duzelt(metin):
     metin = metin.lower().strip()
@@ -258,7 +262,6 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("🙋‍♂️ Oyuna Katıl", callback_data="rpg_join")]]
         await query.edit_message_text(f"🎬 Senaryo: {scenario} seçildi!\n\nOyuna katılmak için aşağıdaki butona basın. Macera 60 saniye sonra başlayacak!", reply_markup=InlineKeyboardMarkup(keyboard))
         
-        # Görevi arka plana atarken Garbage Collector silmesin diye kasaya (Set) ekliyoruz
         task = asyncio.create_task(run_rpg_game(chat_id, context))
         BACKGROUND_TASKS.add(task)
         task.add_done_callback(BACKGROUND_TASKS.discard)
@@ -317,7 +320,8 @@ async def run_rpg_game(chat_id, context):
             if round_num == 1:
                 prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Katılımcılar: {player_names}. Katılımcıları senaryo içinde farklı konumlara/durumlara yerleştirerek macerayı başlat. Acımasız ve edebi bir Dungeon Master gibi anlat. Karakterlerin durumunu derinleştirerek hikayeleştir.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir katılımcının durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma."
             elif round_num < 4:
-                prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız hamle yapanları veya 'eylemsiz kaldı' diyenleri vahşice ÖLDÜR. Mantıklı olanları yaşat ve yeni bir ölümcül kriz yarat.\n\nÖNEMLİ KURAL: Ortamdaki yeni krizi ve atmosferi açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir karakterin hamle sonucunu ve yeni durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. ASLA yıldız(*) kullanma."
+                # Prompt Güvenlik İçin Hafifletildi ("vahşice ÖLDÜR" -> "acımasızca ÖLDÜR veya trajik şekilde elenmesini sağla")
+                prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\n\nDeğerlendirme yap: Mantıksız hamle yapanları veya 'eylemsiz kaldı' diyenleri acımasızca ÖLDÜR veya trajik şekilde elenmesini sağla. Mantıklı olanları yaşat ve yeni bir ölümcül kriz yarat.\n\nÖNEMLİ KURAL: Ortamdaki yeni krizi ve atmosferi açıklamak için 30 İLA 40 KELİME ARASI kullan. Her bir karakterin hamle sonucunu ve yeni durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA bu turda ölenlerin isimlerini virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. ASLA yıldız(*) kullanma."
             else:
                 prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat. Karakter durumlarını epik bir dille hikayeleştir.\n\nÖNEMLİ KURAL: Ortamı ve finalin genel sonucunu açıklamak için 30 İLA 40 KELİME ARASI kullan. Katılımcı isimlerini mutlaka HTML formatında <b>isim</b> şeklinde kalın yaz! Yanıtının EN BAŞINA ölenlerin isimlerini 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. ASLA yıldız(*) kullanma."
                 
@@ -335,7 +339,7 @@ async def run_rpg_game(chat_id, context):
                 )
                 text = res.text
             except Exception as e:
-                await context.bot.send_message(chat_id, f"Sistem hatası (Yoğunluk): DM bayıldı, oyun iptal.")
+                await context.bot.send_message(chat_id, f"Sistem hatası (Sınır/Güvenlik Aşıldı): DM bayıldı, oyun iptal.\nNedeni: `{e}`")
                 break
 
             display_text = text
@@ -398,7 +402,6 @@ async def run_rpg_game(chat_id, context):
 
             game["current_caption"] = msg_text
 
-            # Zırhlı Gönderim: HTML etiketleri bozuksa bot çökmesin diye fallback mekanizması eklendi
             try:
                 msg = await context.bot.send_photo(chat_id, photo=image_url, caption=msg_text, parse_mode='HTML')
                 game["is_photo_msg"] = True
