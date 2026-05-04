@@ -115,7 +115,6 @@ async def update_all_horoscopes():
             success = False
             retry_count = 0
             
-            # Başarana kadar bu döngüden çıkmaz (Limit hatasında 90sn bekler tekrar dener)
             while not success:
                 try:
                     print(f"📡 {burc.upper()} internetten çekiliyor (Deneme: {retry_count + 1})...")
@@ -133,44 +132,39 @@ async def update_all_horoscopes():
                     
                     HOROSCOPE_CACHE[burc] = res.text
                     print(f"✅ {burc.upper()} başarıyla hafızaya alındı.")
-                    success = True # Başarılı oldu, döngüden çıkabilir
+                    success = True 
                     
                 except Exception as e:
                     retry_count += 1
                     print(f"❌ Hata ({burc}): {e}. Google'ı dinlendirmek için 90 saniye bekleniyor...")
                     if HOROSCOPE_CACHE[burc] == "":
                         HOROSCOPE_CACHE[burc] = "Şu anda tüm zenithar yıldızlara bakarak sigara içiyor 5 dakika sonra tekrar dene."
-                    await asyncio.sleep(90) # Hata alınca zorunlu bekleme
+                    await asyncio.sleep(90) 
             
-            # Burç başarıyla alındıktan sonra diğer burca geçmeden Google'ı dinlendir
-            if burc != VALID_ZODIACS[-1]: # Son burç değilse bekle
+            if burc != VALID_ZODIACS[-1]: 
                 print(f"⏳ {burc.upper()} tamamlandı. Diğer burca geçmeden önce 90 saniye dinlenme...")
                 await asyncio.sleep(90) 
                 
         print("✅ TÜM BURÇLAR (12/12) HAFIZAYA BAŞARIYLA KAYDEDİLDİ!")
     finally:
-        IS_UPDATING = False # İşlem bitti, kilidi aç
+        IS_UPDATING = False
 
 async def background_scheduler():
     """Bot ilk açıldığında BEKLER. Sadece gece 02:00'de otomatik tetiklenir."""
     print("🚀 Sistem başlatıldı. İlk hafıza dolumu için Admin'den /update komutu bekleniyor veya gece 02:00 bekleniyor...")
     
-    # İLK AÇILIŞ GÜNCELLEMESİ KALDIRILDI! Sadece döngü çalışacak.
-    
     while True:
         tz = pytz.timezone("Europe/Istanbul")
         now = datetime.datetime.now(tz)
         
-        # Gece 02:00 otomatik güncelleme
         if now.hour == UPDATE_HOUR and now.minute == 0:
             await update_all_horoscopes()
-            await asyncio.sleep(60) # Aynı dakikada 2. kez tetiklenmeyi önler
+            await asyncio.sleep(60)
             
         await asyncio.sleep(30)
 
 # --- 4. KOMUT MOTORLARI ---
 
-# 👑 ADMİN ÖZEL KOMUT (Zaten mevcuttu, kontrol edildi)
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     global IS_UPDATING
     if update.effective_user.id not in ADMIN_IDS: return 
@@ -181,21 +175,23 @@ async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🔄 Manuel toplu güncelleme başlatıldı.\nHer burç arası 90 saniye bekleniyor.\nİşlem yaklaşık 18 dakika sürecektir.")
         asyncio.create_task(update_all_horoscopes())
 
-# 👑 YENİ ADMİN ÖZEL KOMUT (Anket - /ama) - DİNAMİK YAPAY ZEKA DESTEĞİ VE MANTIKLI SEÇENEKLER
+# 👑 YENİ ADMİN ÖZEL KOMUT (Anket - /ama) - KAPSAYICI (ÇOCUK/KIZ) VE BETA YAZISI KALDIRILDI
 async def ama_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != 'private': return
     if update.effective_user.id not in ADMIN_IDS: return
 
-    gender = random.choice(['Çocuk', 'Kız'])
+    # Artık tek tip kapsayıcı ifade kullanıyoruz
+    gender = "Çocuk/Kız"
     is_high_score = random.random() < 0.60 
 
     status_msg = await update.message.reply_text("🤔 Anket sorusu ve mantıklı seçenekler yaratılıyor...")
 
     score = random.randint(8, 10) if is_high_score else random.randint(1, 7)
 
-    prompt = f"""Bir {gender.lower()} düşün. Dış görünüşü {score}/10. Buna gerçekçi ama fikir ayrılığı yaratacak, tartışmalı bir huy/özellik ekle.
+    prompt = f"""Potansiyel bir partner ({gender}) düşün. Dış görünüşü {score}/10. Buna gerçekçi ama fikir ayrılığı yaratacak, tartışmalı bir huy/özellik ekle.
 Puan yüksekse (8-10) özellik itici veya zorlayıcı olsun (red flag). Puan düşükse (1-7) özellik cazip veya durumu kurtaran bir şey olsun (green flag).
 Sadece 'ama'dan sonraki kısmı yazacaksın. Uçuk kaçık fantastik veya çok saçma şeyler olmasın (örnek: ağzında bozuk para biriktiriyor GİBİ OLAMAZ). İkili ilişkilerde insanların gerçekten tartışıp kafa yoracağı durumlar olsun (örnek: eski sevgilisiyle hala yakın arkadaş, hesabı asla ödemiyor, annesinin sözünden çıkmıyor).
+ÖNEMLİ KURAL: Özelliği yazarken cinsiyet belirtme (örneğin 'kız arkadaşlarıyla' veya 'erkek kankalarıyla' yerine 'karşı cinsten arkadaşlarıyla' gibi genel ifadeler kullan ki anketi okuyan hem erkekler hem kadınlar kendilerine göre yorumlayabilsin).
 
 Ayrıca bu duruma insanların verebileceği 5 farklı anketi şıkkını yaz. 
 ŞARTLAR:
@@ -211,11 +207,11 @@ Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
 4- [Şık 4]
 5- [Şık 5]"""
 
-    # Varsayılan değerler (API hata verirse patlamasın diye)
+    # Varsayılan değerler
     trait = "eski sevgilisiyle hala yakın arkadaş"
     options = [
         "Sıkıntı yok güveniyorsam tamam",
-        "Duruma ve kıza/çocuğa göre değişir",
+        "Duruma ve karşındakine göre değişir",
         "Kesinlikle sorun çıkarırım",
         "Direkt yol veririm",
         "Böyle saçmalık olmaz amk"
@@ -235,7 +231,6 @@ Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
             )
         )
         
-        # Yanıtı ayrıştırma
         lines = [line.strip() for line in res.text.strip().split('\n') if line.strip()]
         parsed_options = []
         
@@ -244,7 +239,7 @@ Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
                 trait = line.replace("Özellik:", "").strip()
             elif re.match(r'^[1-5][-.)]\s*', line):
                 clean_opt = re.sub(r'^[1-5][-.)]\s*', '', line).strip()
-                clean_opt = clean_opt.replace('*', '') # Bold işaretlerini temizle
+                clean_opt = clean_opt.replace('*', '') 
                 parsed_options.append(clean_opt)
         
         if len(parsed_options) == 5:
@@ -253,26 +248,46 @@ Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
     except Exception as e:
         print(f"Ama komutu AI hatası veya Parse hatası: {e}")
 
-    # Soru Formatı: Başlık ve Soru
-    question_text = f"🧪 Beta Özellik\n\n{gender} {score}/10 ama {trait}?"
-    
+    # Telegram Sınırları Koruyucusu ve Beta Özellik yazısının kaldırılması
+    question_text = f"{gender} {score}/10 ama {trait}?"
+    question_text = question_text[:290] # Soru max 300 karakter
+
+    # Şıkları benzersiz yap (Duplicate Option Hatasını Önle) ve 100 karaktere kırp
+    safe_options = []
+    for opt in options:
+        clean_opt = opt[:95] # Şık max 100 karakter
+        if clean_opt not in safe_options:
+            safe_options.append(clean_opt)
+        else:
+            safe_options.append(clean_opt + " (Katılıyorum)") # Aynı şık varsa sonuna kelime ekle
+            
+    if len(safe_options) < 2:
+        safe_options = ["Evet", "Hayır"] # En kötü ihtimalde çökmesin diye kurtarma
+        
     success_count = 0
+    error_messages = []
+    
     for group_id in ALLOWED_GROUPS:
         try:
             await context.bot.send_poll(
                 chat_id=group_id,
                 question=question_text,
-                options=options,
+                options=safe_options,
                 is_anonymous=False 
             )
             success_count += 1
         except Exception as e:
-            print(f"Anket {group_id} grubuna gönderilemedi: {e}")
+            error_text = f"❌ {group_id} ID'li gruba gönderilemedi.\nTelegram Hatası: `{e}`"
+            print(error_text)
+            error_messages.append(error_text)
     
-    await status_msg.edit_text(f"✅ Soru üretildi ve {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {gender} {score}/10 ama {trait}")
+    if success_count > 0:
+        await status_msg.edit_text(f"✅ Soru {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {gender} {score}/10 ama {trait}")
+    else:
+        hata_raporu = "\n\n".join(error_messages)
+        await status_msg.edit_text(f"⚠️ Anket 0 gruba gönderildi! Sorun Telegram tarafından engellendi.\n\nİşte detaylar:\n{hata_raporu}")
 
 
-# ✨ BURÇ KOMUTU
 async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     
@@ -293,14 +308,12 @@ async def burcyorumla_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     yorum = HOROSCOPE_CACHE.get(burc_input)
 
-    # Eğer bot yeni açılmışsa ve admin henüz /update yapmamışsa
     if yorum == "":
         await update.message.reply_text("🛰️ Yıldızlar henüz uyanmadı. Lütfen yönetici güncellemeyi başlatana kadar veya gece güncellemesi yapılana kadar bekle.")
     else:
-        # Hafızadan anında cevap
         await update.message.reply_text(f"✨ {burc_input.upper()} YORUMU ({bugun}):\n\n{yorum}")
 
-# ☕ KAHVE FALI KOMUTU
+
 async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     
@@ -314,7 +327,6 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         photo_file = await photo_obj.get_file(); f = io.BytesIO(); await photo_file.download_to_memory(f); f.seek(0)
         prompt = "Görseldeki kahve lekelerini somut nesnelere benzeterek dobra ve mistik bir dille yorumla. Klişelerden kaçın. maksimum 150 kelime kullan ve asla yıldız(*) işareti kullanma. Her paragrafın başına içeriğine uygun bir emoji ekle."
         
-        # Güvenlik filtresi eklendi (Hata vermemesi için)
         res = await client.aio.models.generate_content(
             model=MODEL_NAME, 
             contents=[prompt, types.Part.from_bytes(data=f.read(), mime_type="image/jpeg")],
@@ -330,7 +342,7 @@ async def falbak_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"☕ Zenithar Falcı Teyze:\n\n{res.text}")
     except: await status_msg.edit_text("⚠️ Fincanı okuyamadım.")
 
-# 📝 ÖZETLE KOMUTU
+
 async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     
@@ -345,14 +357,13 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"📝 ÖZET:\n\n{res.text}")
     except: await status_msg.edit_text("❌ Hata.")
 
-# 🃏 TAROT KOMUTU
+
 async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
     try:
-        # Güvenlik filtresi eklendi (Hata vermemesi için)
         res = await client.aio.models.generate_content(
             model=MODEL_NAME, 
             contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla. maksimum 120 kelime kullan ama asla yıldız işareti(*) kullanma. Her paragrafın başına o paragrafa uygun bir emoji ekle.",
@@ -368,27 +379,20 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status.edit_text(f"🔮 TAROT FALI:\n\n{res.text}")
     except: await status.edit_text("Tüh bağlantı koptu.")
 
-# --- 5. ANA ÇALIŞTIRICI ---
 
 async def main():
     keep_alive()
     
-    # Arka plan zamanlayıcısını başlatır
     asyncio.create_task(background_scheduler())
     
     application = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
     
-    # --- YENİ EKLENEN GÜVENLİK DUVARI ---
-    # Sadece yetkili grupları ve özel mesajdaki Adminleri izinli sayar
     allowed_filter = filters.Chat(chat_id=ALLOWED_GROUPS) | (filters.ChatType.PRIVATE & filters.User(user_id=ADMIN_IDS))
     
-    # Bota gelen metin, komut, fotoğraf veya ses gibi etkileşimleri yakalar
     interaction_filter = filters.TEXT | filters.COMMAND | filters.PHOTO | filters.VOICE | filters.AUDIO | filters.Document.ALL
     
-    # Eğer gelen işlem yetkili listeden DEĞİLSE, diğer komutlara hiç bakmadan direkt fırça atar ve işlemi keser
     application.add_handler(MessageHandler(interaction_filter & (~allowed_filter), reject_unauthorized))
     
-    # Komut Yakalayıcılar
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/update'), update_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ama'), ama_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/tarotbak'), tarot_command))
@@ -401,13 +405,12 @@ async def main():
     await application.initialize(); await application.start()
     await application.updater.start_polling(drop_pending_updates=True)
     
-    # Uygulamayı sonsuz döngüde tut
     while True: await asyncio.sleep(3600)
 
 if __name__ == "__main__":
     try: 
         print("Eski bot örneğinin kapanması bekleniyor...")
-        time.sleep(10) # Çakışma önleyici
+        time.sleep(10) 
         asyncio.run(main())
     except Exception as e: 
         print(f"Kritik Hata: {e}")
