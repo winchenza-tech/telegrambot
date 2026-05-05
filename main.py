@@ -225,7 +225,7 @@ async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🪓 Arınma Gecesi", callback_data="rpg_scen_arinma")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🎲 Mini RPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
+    await update.message.reply_text("🎲 ZenithaRPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
 
 async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
