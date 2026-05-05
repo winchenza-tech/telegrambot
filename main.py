@@ -43,7 +43,7 @@ nest_asyncio.apply()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-MODEL_NAME = 'gemini-1.5-pro'
+MODEL_NAME = 'gemini-3-flash'
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # HAFIZA, KİLİT VE GÖREV (TASK) SİSTEMİ
