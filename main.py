@@ -285,7 +285,6 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         caption_text = f"🎬 <b>Senaryo: {scenario} seçildi!</b>\n\nOyuna katılmak için aşağıdaki butona basın. Macera 45 saniye sonra başlayacak!\n<i>(Oyunun başlaması için minimum 3 katılımcı gereklidir)</i>"
         
-        # Arınma gecesi gibi kelimelerin görsel üretici tarafından bloklanması ihtimaline karşı hata yakalayıcı:
         try:
             await context.bot.send_photo(
                 chat_id=chat_id, 
@@ -452,18 +451,19 @@ async def run_rpg_game(chat_id, context):
 
             dead_context = f"\n\nÖNEMLİ KURAL 1: Önceki Turda Ölenler/Elenenler: {', '.join(game['just_died'])}. Onların nasıl öldüklerini ya da elendiklerini alt alta bir liste halinde YAZMA. Hikayenin akışı içine yedirerek, doğal bir anlatımla ve seçimlerini tiye alarak onlarla dalga geç. Mutlaka HTML formatında etiketle." if game.get("just_died") else ""
             
-            elimination_rule = "\n\nÖNEMLİ KURAL 4: Katılımcı sayısı 7'nin altında olduğu için, bu turda zorunlu olarak SADECE VE TAM OLARAK 1 kişiyi öldür/ele." if len(players) < 7 else ""
+            elimination_rule = "\n\nÖNEMLİ KURAL 4: Katılımcı sayısı 7'nin altında olduğu için, bu turda zorunlu olarak SADECE VE TAM OLARAK 1 kişiyi öldür/ele." if len(players) < 7 and round_num > 1 else ""
+            interaction_rule = "\n\nÖNEMLİ KURAL 5: Senaryo ilerlediği için (özellikle bu turlarda) hayatta kalan karakterlerin durumlarını ve eylemlerini hikaye içinde birbiriyle etkileşime sokarak anlat." if round_num >= 4 else ""
 
             if not is_final_round:
                 if round_num == 1:
-                    dead_instruction = "Yanıtının EN BAŞINA bu turda ölen/elenen kişinin ismini (etiketsiz, sadece düz metin olarak) 'ÖLENLER: isim' şeklinde yaz" if len(players) < 7 else "Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz"
+                    dead_instruction = "Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz (İlk tur olduğu için KESİNLİKLE kimse ölemez, herkes hayatta başlamalıdır)"
                     prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Hayatta Olan Katılımcılar ve ID'leri: {alive_player_identities}. Oyuncuların hepsi yan yana başlamasın. Şansa bağlı olarak bazıları yan yana başlasın ama bu her zaman avantajlarına olmasın, bazıları birbirinden ayrı veya ölümcül derecede tehlikeli konumlarda olsun. Acımasız ve edebi bir Dungeon Master gibi anlat.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30-40 kelime kullan. Katılımcıların durumunu hikayeleştirerek açıklamak için HER BİRİNE MAKSİMUM 40 KELİME kullan. Katılımcı isimlerini senaryo içinde mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. {dead_instruction} ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
                 elif round_num == 3:
                     prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Bu turda tüm hayatta kalanları ilgilendiren kritik bir yol ayrımı yarat. Hikayenin EN SONUNA Telegram anketi oluşturulması için tam şu formatta 1 soru ve 5 kısa şık ekle (Başka hiçbir şey yazma):\n[ANKET SORU]: Soru metni\n[ŞIK 1]: Şık 1\n[ŞIK 2]: Şık 2\n[ŞIK 3]: Şık 3\n[ŞIK 4]: Şık 4\n[ŞIK 5]: Şık 5\n\nKatılımcı isimlerini mutlaka HTML formatında etiketle. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
                 else:
-                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR ve yeni bir ölümcül kriz yarat.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Katılımcı isimlerini mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
+                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR ve yeni bir ölümcül kriz yarat.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Katılımcı isimlerini mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}{interaction_rule}"
             else:
-                prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler KESİNLİKLE hikayede yer alamaz.\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat.{dead_context}\n\nÖNEMLİ KURAL 2: Tüm final anlatımını MAKSİMUM 120 KELİME kullanarak yap. Katılımcı isimlerini HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA ölenlerin isimlerini (etiketsiz, düz metin) 'ÖLENLER: isim1, isim2' şeklinde yaz. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak."
+                prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler KESİNLİKLE hikayede yer alamaz.\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat.{dead_context}\n\nÖNEMLİ KURAL 2: Tüm final anlatımını MAKSİMUM 120 KELİME kullanarak yap. Katılımcı isimlerini HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA ölenlerin isimlerini (etiketsiz, düz metin) 'ÖLENLER: isim1, isim2' şeklinde yaz. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{interaction_rule}"
                 
             try:
                 res = await safe_generate(
@@ -556,7 +556,7 @@ async def run_rpg_game(chat_id, context):
             image_url = f"https://image.pollinations.ai/prompt/{eng_scen}_round_{round_num}?width=800&height=400&nologo=true"
             
             if round_num == 3 and poll_question and len(poll_options) >= 2:
-                msg_text = f"🎲 <b>TUR {round_num}/{total_rounds}</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 30 saniye. Lütfen hemen aşağıya gönderilen ANKETİ yanıtlayın!</i>"
+                msg_text = f"🎲 <b>TUR {round_num}/{total_rounds}</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 60 saniye. Lütfen hemen aşağıya gönderilen ANKETİ yanıtlayın! (Sadece anket oyları geçerlidir)</i>"
             elif is_final_round:
                 scoreboard = "\n\n🏆 <b>OYUN SONU PUANLARI:</b>\n"
                 for uid, p in players.items():
@@ -601,12 +601,12 @@ async def run_rpg_game(chat_id, context):
             
             if not is_final_round:
                 if round_num == 3 and poll_question and len(poll_options) >= 2:
-                    # Anketli tur için 30 saniye bekleme
-                    await asyncio.sleep(15)
+                    # Anketli tur için toplam 55 saniye bekleme (40 saniye + 15 saniye uyarı ile)
+                    await asyncio.sleep(40)
                     game_check = RPG_GAMES.get(chat_id)
                     if game_check and game_check["status"] == "playing" and game_check["round"] == round_num:
                         try:
-                            uyari_metni = "⏳ <b>Anketi yanıtlamak için SON 15 SANİYE!</b>"
+                            uyari_metni = "⏳ <b>Anketi yanıtlamak için SON 15 SANİYE!</b> Sadece anketteki oylar dikkate alınacaktır."
                             await context.bot.send_message(chat_id, uyari_metni, parse_mode='HTML')
                         except Exception:
                             pass
@@ -680,7 +680,10 @@ async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if chat_id in RPG_GAMES and RPG_GAMES[chat_id]["status"] == "playing":
             game = RPG_GAMES[chat_id]
-            if msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id:
+            # YENİ KURAL: 3. Turda sadece anket oyları geçerlidir, mesaj/fotoğraf alıntıları hamle sayılmaz!
+            if game["round"] == 3:
+                pass # Sadece pas geçiyoruz ama yine de normal mesaj hafızası için (/getir) çalışmaya devam edecek
+            elif msg.reply_to_message and msg.reply_to_message.from_user.id == context.bot.id:
                 user_id = update.effective_user.id
                 if user_id in game["players"] and game["players"][user_id]["status"] == "alive":
                     if game["players"][user_id]["action"] is None: 
@@ -825,21 +828,22 @@ async def ama_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     gender = "Çocuk/Kız"
     is_high_score = random.random() < 0.60 
 
-    status_msg = await update.message.reply_text("🤔 Anket sorusu ve mantıklı seçenekler yaratılıyor...")
+    status_msg = await update.message.reply_text("🤔 Yaratıcı ve tartışmalı bir anket sorusu üretiliyor...")
 
     score = random.randint(8, 10) if is_high_score else random.randint(1, 7)
 
-    prompt = f"""Potansiyel bir partner ({gender}) düşün. Dış görünüşü {score}/10. Buna gerçekçi ama fikir ayrılığı yaratacak, tartışmalı bir huy/özellik ekle.
+    prompt = f"""Potansiyel bir partner ({gender}) düşün. Dış görünüşü {score}/10. Buna gerçekçi ama fikir ayrılığı yaratacak, çok tartışmalı ve YARATICI bir huy/özellik ekle.
 Puan yüksekse (8-10) özellik itici veya zorlayıcı olsun (red flag). Puan düşükse (1-7) özellik cazip veya durumu kurtaran bir şey olsun (green flag).
-Sadece 'ama'dan sonraki kısmı yazacaksın. Uçuk kaçık fantastik veya çok saçma şeyler olmasın (örnek: ağzında bozuk para biriktiriyor GİBİ OLAMAZ). İkili ilişkilerde insanların gerçekten tartışıp kafa yoracağı durumlar olsun (örnek: eski sevgilisiyle hala yakın arkadaş, hesabı asla ödemiyor, annesinin sözünden çıkmıyor).
-ÖNEMLİ KURAL: Özelliği yazarken cinsiyet belirtme (örneğin 'kız arkadaşlarıyla' veya 'erkek kankalarıyla' yerine 'karşı cinsten arkadaşlarıyla' gibi genel ifadeler kullan ki anketi okuyan hem erkekler hem kadınlar kendilerine göre yorumlayabilsin).
+Sadece 'ama'dan sonraki kısmı yazacaksın. Sürekli 'eski sevgili' örneğini verme! Daha yaratıcı, sosyal hayat, alışkanlıklar, ideolojiler, aile veya tuhaf takıntılar üzerinden git. Uçuk kaçık fantastik veya çok saçma şeyler olmasın.
+ÖNEMLİ KURAL: Özelliği yazarken cinsiyet belirtme (genel ifadeler kullan ki anketi okuyan hem erkekler hem kadınlar kendilerine göre yorumlayabilsin).
 
-Ayrıca bu duruma insanların verebileceği 5 farklı anketi şıkkını yaz. 
+Ayrıca bu duruma insanların verebileceği 4 farklı anketi şıkkını yaz. 
 ŞARTLAR:
 1. Şıklarda KESİNLİKLE emoji KULLANMA. Sadece düz metin olsun.
 2. Şıklar oluşturduğun bu spesifik duruma tam uygun olsun.
 3. Olumsuz veya sinirli şıklarda 'amk' kelimesini kullanabilirsin.
 4. Her bir şık MAKSİMUM 10 KELİME olmalıdır.
+5. TAM OLARAK 4 ŞIK yazılmalıdır.
 
 Yanıtını tam olarak şu formatta ver (Başka hiçbir açıklama yazma):
 Emoji: [Duruma uygun tek bir emoji]
@@ -847,12 +851,11 @@ Emoji: [Duruma uygun tek bir emoji]
 1- [Şık 1]
 2- [Şık 2]
 3- [Şık 3]
-4- [Şık 4]
-5- [Şık 5]"""
+4- [Şık 4]"""
 
     emoji = "🤔"
-    trait = "eski sevgilisiyle hala yakın arkadaş"
-    options = ["Sıkıntı yok güveniyorsam tamam", "Duruma ve karşındakine göre değişir", "Kesinlikle sorun çıkarırım", "Direkt yol veririm", "Böyle saçmalık olmaz amk"]
+    trait = "hesap ödemekten ölümüne kaçıyor"
+    options = ["Sıkıntı yok güveniyorsam tamam", "Duruma ve karşındakine göre değişir", "Kesinlikle sorun çıkarırım", "Direkt yol veririm"]
 
     try:
         res = await safe_generate(
@@ -873,12 +876,12 @@ Emoji: [Duruma uygun tek bir emoji]
         for line in lines:
             if line.startswith("Emoji:"): emoji = line.replace("Emoji:", "").strip()
             elif line.startswith("Özellik:"): trait = line.replace("Özellik:", "").strip()
-            elif re.match(r'^[1-5][-.)]\s*', line):
-                clean_opt = re.sub(r'^[1-5][-.)]\s*', '', line).strip()
+            elif re.match(r'^[1-4][-.)]\s*', line):
+                clean_opt = re.sub(r'^[1-4][-.)]\s*', '', line).strip()
                 clean_opt = clean_opt.replace('*', '') 
                 parsed_options.append(clean_opt)
         
-        if len(parsed_options) == 5: options = parsed_options
+        if len(parsed_options) == 4: options = parsed_options
 
     except Exception: pass
 
@@ -893,18 +896,53 @@ Emoji: [Duruma uygun tek bir emoji]
             
     if len(safe_options) < 2: safe_options = ["Evet", "Hayır"] 
         
-    success_count = 0
     error_messages = []
-    
-    for group_id in ALLOWED_GROUPS:
+    forwarded_groups = []
+    admin_chat_id = update.effective_user.id
+    first_group = ALLOWED_GROUPS[0]
+    poll_msg = None
+
+    # ORTAK ANKET MANTIĞI: Önce ilk gruba atıp sonra diğerlerine "forward" eder (tek ortak anket)
+    try:
+        poll_msg = await context.bot.send_poll(chat_id=first_group, question=question_text, options=safe_options, is_anonymous=False)
+        forwarded_groups.append(first_group)
+        
+        # İlk gruba başarıyla gittiyse, diğerlerine forwardla
+        for group_id in ALLOWED_GROUPS[1:]:
+            try:
+                await context.bot.forward_message(chat_id=group_id, from_chat_id=first_group, message_id=poll_msg.message_id)
+                forwarded_groups.append(group_id)
+            except Exception as e:
+                # İletim hatası alırsak ana hatayı tetikleyip B planına geçelim
+                raise e
+    except Exception as e:
+        # HATA DURUMU (B PLANI): Gruplar arası forward patlarsa ilk grubun mesajını (gittiyse) sil ve adminin DM'inden tüm gruplara forwardla
+        if poll_msg and first_group in forwarded_groups:
+            try:
+                await context.bot.delete_message(chat_id=first_group, message_id=poll_msg.message_id)
+            except: pass
+            
+        forwarded_groups = []
         try:
-            await context.bot.send_poll(chat_id=group_id, question=question_text, options=safe_options, is_anonymous=False)
-            success_count += 1
-        except Exception as e:
-            error_messages.append(f"❌ {group_id} ID'li gruba gönderilemedi.\nTelegram Hatası: `{e}`")
-    
-    if success_count > 0: await status_msg.edit_text(f"✅ Soru {success_count} gruba anket olarak gönderildi!\n\nGönderilen Soru: {emoji} {gender} {score}/10 ama {trait}")
-    else: await status_msg.edit_text(f"⚠️ Anket 0 gruba gönderildi! Sorun Telegram tarafından engellendi.\n\nİşte detaylar:\n" + "\n\n".join(error_messages))
+            # Önce yöneticinin (komutu kullananın) DM'sine at
+            poll_msg = await context.bot.send_poll(chat_id=admin_chat_id, question=question_text, options=safe_options, is_anonymous=False)
+            
+            # DM'den tüm gruplara forwardla
+            for group_id in ALLOWED_GROUPS:
+                try:
+                    await context.bot.forward_message(chat_id=group_id, from_chat_id=admin_chat_id, message_id=poll_msg.message_id)
+                    forwarded_groups.append(group_id)
+                except Exception as inner_e:
+                    error_messages.append(f"❌ {group_id} ID'li gruba DM üzerinden iletilemedi: {inner_e}")
+        except Exception as ex:
+            error_messages.append(f"❌ Yönetici DM kutusuna anket gönderilemedi: {ex}")
+
+    success_count = len(forwarded_groups)
+
+    if success_count > 0: 
+        await status_msg.edit_text(f"✅ Soru başarıyla ortak anket formatında {success_count} gruba iletildi!\n\nGönderilen Soru: {emoji} {gender} {score}/10 ama {trait}")
+    else: 
+        await status_msg.edit_text(f"⚠️ Anket hiçbir gruba gönderilemedi! İletim sorunu yaşandı.\n\nİşte detaylar:\n" + "\n\n".join(error_messages))
 
 
 async def update_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1041,7 +1079,7 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/puanyedek'), puanyedek_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/puanla'), puanla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/rpg'), rpg_command))
-    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/iptalrpg'), iptalrpg_command)) # YENİ EKLENEN İPTAL KOMUTU
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/iptalrpg'), iptalrpg_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/update'), update_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ama'), ama_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/getir'), getir_command))
