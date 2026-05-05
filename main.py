@@ -863,5 +863,3 @@ if __name__ == "__main__":
         asyncio.run(main())
     except Exception as e: 
         print(f"Kritik Hata: {e}")
-
-```
