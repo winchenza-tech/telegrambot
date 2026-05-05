@@ -160,6 +160,17 @@ async def background_scheduler():
 
 # --- 4. KOMUT MOTORLARI ---
 
+# RPG OYUNU İPTAL KOMUTU
+async def iptalrpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    chat_id = update.effective_chat.id
+    
+    if chat_id in RPG_GAMES:
+        RPG_GAMES.pop(chat_id, None)
+        await update.message.reply_text("🛑 <b>RPG Oyunu iptal edildi.</b> Mevcut oyun ve tüm bekleyen işlemler durduruldu.", parse_mode="HTML")
+    else:
+        await update.message.reply_text("⚠️ Şu anda iptal edilecek aktif veya bekleyen bir RPG oyunu bulunmuyor.")
+
 # RPG PUAN SIRALAMASI
 async def rpgpuan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
@@ -215,7 +226,7 @@ async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     
     if chat_id in RPG_GAMES and RPG_GAMES[chat_id].get("is_active"):
-        await update.message.reply_text("⏳ Zaten devam eden veya bekleyen bir RPG oyunu var!")
+        await update.message.reply_text("⏳ Zaten devam eden veya bekleyen bir RPG oyunu var! İptal etmek istersen /iptalrpg komutunu kullanabilirsin.")
         return
         
     keyboard = [
@@ -271,14 +282,26 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard = [[InlineKeyboardButton("🙋‍♂️ Oyuna Katıl", callback_data="rpg_join")]]
         
         await query.message.delete()
-        await context.bot.send_photo(
-            chat_id=chat_id, 
-            photo=intro_image_url, 
-            caption=f"🎬 <b>Senaryo: {scenario} seçildi!</b>\n\nOyuna katılmak için aşağıdaki butona basın. Macera 45 saniye sonra başlayacak!\n<i>(Oyunun başlaması için minimum 3 katılımcı gereklidir)</i>", 
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='HTML'
-        )
         
+        caption_text = f"🎬 <b>Senaryo: {scenario} seçildi!</b>\n\nOyuna katılmak için aşağıdaki butona basın. Macera 45 saniye sonra başlayacak!\n<i>(Oyunun başlaması için minimum 3 katılımcı gereklidir)</i>"
+        
+        # Arınma gecesi gibi kelimelerin görsel üretici tarafından bloklanması ihtimaline karşı hata yakalayıcı:
+        try:
+            await context.bot.send_photo(
+                chat_id=chat_id, 
+                photo=intro_image_url, 
+                caption=caption_text, 
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='HTML'
+            )
+        except Exception:
+            await context.bot.send_message(
+                chat_id=chat_id, 
+                text=caption_text, 
+                reply_markup=InlineKeyboardMarkup(keyboard),
+                parse_mode='HTML'
+            )
+            
         task = asyncio.create_task(run_rpg_game(chat_id, context))
         BACKGROUND_TASKS.add(task)
         task.add_done_callback(BACKGROUND_TASKS.discard)
@@ -385,7 +408,7 @@ async def run_rpg_game(chat_id, context):
         
         game = RPG_GAMES.get(chat_id)
         if not game or len(game["players"]) < 3:
-            await context.bot.send_message(chat_id, "😢 Yeterli katılımcı sağlanamadı (Minimum 3 kişi gerekiyor). RPG oyunu iptal edildi.")
+            await context.bot.send_message(chat_id, "😢 Yeterli katılımcı sağlanamadı (Minimum 3 kişi gerekiyor) veya oyun iptal edildi. RPG oyunu sonlandırıldı.")
             RPG_GAMES.pop(chat_id, None)
             return
             
@@ -405,6 +428,8 @@ async def run_rpg_game(chat_id, context):
             round_points[r] = int((total_pool / weight_sum) * r)
         
         for round_num in range(1, total_rounds + 1):
+            game = RPG_GAMES.get(chat_id)
+            if not game: return # iptal komutu ile poplanmışsa döngüyü kırar
             game["round"] = round_num
             
             alive_players = [p for p in players.values() if p["status"] == "alive"]
@@ -609,8 +634,10 @@ async def run_rpg_game(chat_id, context):
         
     except Exception as e:
         print(f"Kritik Oyun Hatası: {e}")
-        await context.bot.send_message(chat_id, f"⚠️ Oyun motorunda kritik bir hata oluştu ve oyun iptal edildi.\nHata detayı: {e}")
-        RPG_GAMES.pop(chat_id, None)
+        # Oyun zaten iptal edildiyse veya bitirildiyse bu mesajı atmasını önleyelim
+        if chat_id in RPG_GAMES:
+            await context.bot.send_message(chat_id, f"⚠️ Oyun motorunda kritik bir hata oluştu ve oyun iptal edildi.\nHata detayı: {e}")
+            RPG_GAMES.pop(chat_id, None)
 
 # ANKET CEVAP YAKALAYICI (3. Tur İçin)
 async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1014,6 +1041,7 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/puanyedek'), puanyedek_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/puanla'), puanla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/rpg'), rpg_command))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/iptalrpg'), iptalrpg_command)) # YENİ EKLENEN İPTAL KOMUTU
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/update'), update_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ama'), ama_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/getir'), getir_command))
