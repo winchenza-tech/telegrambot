@@ -169,7 +169,7 @@ async def rpgpuan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     sorted_scores = sorted(RPG_SCORES.values(), key=lambda x: x["score"], reverse=True)
     
-    text = "🏆 <b>ZenithaRPG HAYATTA KALMA SIRALAMASI</b> 🏆\n\n"
+    text = "🏆 <b>RPG HAYATTA KALMA SIRALAMASI</b> 🏆\n\n"
     for i, p in enumerate(sorted_scores):
         if i == 0: emoji = "⚔️"
         elif i == 1: emoji = "🛡️"
@@ -225,7 +225,7 @@ async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🪓 Arınma Gecesi", callback_data="rpg_scen_arinma")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🎲 ZenithaRPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
+    await update.message.reply_text("🎲 Mini RPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
 
 async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -254,7 +254,8 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "current_caption": "",
             "recorded_actions": [],
             "is_photo_msg": False,
-            "round_points_log": {} 
+            "round_points_log": {},
+            "just_died": [] 
         }
 
         eng_scen = "rpg_game_scene"
@@ -272,7 +273,7 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_photo(
             chat_id=chat_id, 
             photo=intro_image_url, 
-            caption=f"🎬 <b>Senaryo: {scenario} seçildi!</b>\n\nOyuna katılmak için aşağıdaki butona basın. Macera 60 saniye sonra başlayacak!\n<i>(Oyunun başlaması için minimum 3 katılımcı gereklidir)</i>", 
+            caption=f"🎬 <b>Senaryo: {scenario} seçildi!</b>\n\nOyuna katılmak için aşağıdaki butona basın. Macera 45 saniye sonra başlayacak!\n<i>(Oyunun başlaması için minimum 3 katılımcı gereklidir)</i>", 
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode='HTML'
         )
@@ -296,19 +297,90 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def run_rpg_game(chat_id, context):
     try:
-        # Katılım için ilk 30 saniye
-        await asyncio.sleep(30)
+        game = RPG_GAMES.get(chat_id)
+        if not game: return
+        scenario = game["scenario"]
         
-        # 30 saniye uyarısı
+        fun_facts = {
+            "Issız Ada": [
+                "🏝️ <b>Biliyor muydunuz?</b> Issız bir adada en büyük düşmanınız açlık değil, susuzluk ve güneş çarpmasının getirdiği deliliktir!",
+                "🏝️ <b>Biliyor muydunuz?</b> Hindistan cevizi suyu fazla içildiğinde şiddetli ishale yol açıp sizi susuzluktan öldürebilir!",
+                "🏝️ <b>Biliyor muydunuz?</b> Deniz suyunu içmek böbreklerinizi iflas ettirir ve susuzluk hissini daha da artırarak acı dolu bir ölüme neden olur.",
+                "🏝️ <b>Biliyor muydunuz?</b> Issız adalardaki böcek ısırıkları, tedavi edilmezse saatler içinde ölümcül enfeksiyonlara dönüşebilir.",
+                "🏝️ <b>Biliyor muydunuz?</b> Geceleri sahil kenarında uyumak, aniden yükselen gelgit sularında boğulmanıza sebep olabilir.",
+                "🏝️ <b>Biliyor muydunuz?</b> Ateş yakmak için kullanılan bazı tropikal ağaçların dumanı körlüğe ve solunum yollarının felç olmasına yol açabilir.",
+                "🏝️ <b>Biliyor muydunuz?</b> Yalnızlıktan kaynaklanan izolasyon psikozu, 72 saat içinde halüsinasyonlar görmenize neden olur.",
+                "🏝️ <b>Biliyor muydunuz?</b> Çiğ balık yemek, vücudunuza parazitlerin girmesi için en hızlı yoldur. İçten içe yenilebilirsiniz."
+            ],
+            "Zombi Salgını": [
+                "🧟 <b>Biliyor muydunuz?</b> Zombilerin koku alma duyusu çok gelişmiştir, sessiz olsanız bile ter kokunuz sizi ele verebilir!",
+                "🧟 <b>Biliyor muydunuz?</b> Zombiler acı hissetmez, bu yüzden onları durdurmanın tek yolu beyinlerini yok etmektir!",
+                "🧟 <b>Biliyor muydunuz?</b> Çürüyen bir zombinin ağzındaki bakteriler, ısırılmasanız bile ufak bir tırmıkla sizi ölümcül şekilde enfekte edebilir.",
+                "🧟 <b>Biliyor muydunuz?</b> Zombi salgınında en çok ölüm, zombilerden değil, panikleyen diğer insanların bencilliğinden kaynaklanır.",
+                "🧟 <b>Biliyor muydunuz?</b> Silah sesleri kilometrelerce öteden duyulabilir; ateş ettiğinizde bir zombiyi öldürürken yüzlercesini kendinize çekersiniz.",
+                "🧟 <b>Biliyor muydunuz?</b> Zombiler yorulmaz. Koşarak kaçabilirsiniz ama onlar durmadan yürüdüğü için eninde sonunda sizi yakalarlar.",
+                "🧟 <b>Biliyor muydunuz?</b> Güvenli sandığınız sığınakların havalandırma boşlukları, virüsün kan yoluyla değil havayla da yayılmasına neden olabilir.",
+                "🧟 <b>Biliyor muydunuz?</b> Taze kana bulanmış kıyafetler giymek, kamuflaj sağlamaz; aksine sürüleri üzerinize çeker."
+            ],
+            "Tekinsiz Mağara": [
+                "🦇 <b>Biliyor muydunuz?</b> Derin mağaralarda tam karanlıkta 3 günden fazla kalmak şiddetli halüsinasyonlara ve yön kaybına neden olur!",
+                "🦇 <b>Biliyor muydunuz?</b> Mağara havasındaki bazı zehirli gazlar kokusuzdur, hiçbir şey hissetmeden bayılabilirsiniz!",
+                "🦇 <b>Biliyor muydunuz?</b> Daracık bir tünelde sıkışıp kalmak, panik atağa ve oksijenin hızla tükenmesine yol açar.",
+                "🦇 <b>Biliyor muydunuz?</b> Mağara duvarlarındaki nem ve soğuk, yavaş yavaş hipotermiye girmenize ve uykuya dalarak ölmenize sebep olur.",
+                "🦇 <b>Biliyor muydunuz?</b> Yarasaların dışkıları (guano), solunduğunda akciğerleri parçalayan ölümcül bir mantar hastalığına neden olabilir.",
+                "🦇 <b>Biliyor muydunuz?</b> Mağara zeminleri çok kaygandır, ufak bir düşüşle kırılan bir bacak, yerin metrelerce altında ölüm fermanınızdır.",
+                "🦇 <b>Biliyor muydunuz?</b> Sessiz bir mağarada duyduğunuz fısıltılar, genellikle sadece akan suyun yankısıdır... Ya da öyle umarsınız.",
+                "🦇 <b>Biliyor muydunuz?</b> Işığınız söndüğünde, beyniniz boşlukları doldurmak için karanlıkta sahte canavarlar yaratmaya başlar."
+            ],
+            "Kıyamet": [
+                "☢️ <b>Biliyor muydunuz?</b> Nükleer serpinti sonrası ilk 48 saat yüzeye çıkmak kesin ölüm demektir!",
+                "☢️ <b>Biliyor muydunuz?</b> Kıyamet sonrası dünyada temiz su altından daha değerlidir ve insanlar bir yudum su için en yakınını satabilir!",
+                "☢️ <b>Biliyor muydunuz?</b> Konserve yiyeceklerin bozulmadığı bir efsanedir, paslı bir konserve kutusu botulizmden ölmenize neden olabilir.",
+                "☢️ <b>Biliyor muydunuz?</b> Radyasyon yanıkları anında acı vermez, günler sonra deriniz dökülmeye başladığında gerçeği anlarsınız.",
+                "☢️ <b>Biliyor muydunuz?</b> Çökmüş bir medeniyette en yaygın ölüm nedeni şiddet değil, tedavi edilemeyen basit enfeksiyonlardır.",
+                "☢️ <b>Biliyor muydunuz?</b> Küllerle kaplı bir dünyada güneşi görememek, şiddetli D vitamini eksikliğine ve kemik erimesine yol açar.",
+                "☢️ <b>Biliyor muydunuz?</b> Yıkıntılar arasında dolaşırken kırılan paslı bir çivi, tetanozdan acı içinde ölmeniz için yeterlidir.",
+                "☢️ <b>Biliyor muydunuz?</b> Radyoaktif fırtınalar sırasında sığınağınızın kapısını iyi mühürlemezseniz, ciğerleriniz kelimenin tam anlamıyla kavrulur."
+            ],
+            "Arınma Gecesi": [
+                "🪓 <b>Biliyor muydunuz?</b> Arınma gecesinde en çok cinayeti sokaktaki yabancılar değil, komşular ve sözde en yakın arkadaşlar işler!",
+                "🪓 <b>Biliyor muydunuz?</b> Sirenler çaldığında acil servisler kapanır, bu yüzden ufak bir kesikten kan kaybıyla ölmek en yaygın sonlardan biridir!",
+                "🪓 <b>Biliyor muydunuz?</b> Güvenlik sistemleri genellikle sizi korumaz, sadece katiller için bir hedef veya ölüm tuzağına dönüşür.",
+                "🪓 <b>Biliyor muydunuz?</b> Arınma gecesinde en tehlikeli saatler şafağa yakın olanlardır; umutsuzluğa kapılanlar son dakikada saldırganlaşır.",
+                "🪓 <b>Biliyor muydunuz?</b> Silah kullanmayı bilmeyenlerin çoğu, arınma gecesinde kendi silahlarının kazara ateş almasıyla hayatını kaybeder.",
+                "🪓 <b>Biliyor muydunuz?</b> Sokaklarda maske takanların birçoğu aslında zengin iş insanlarıdır, sıkıntılarını atmak için zayıfları avlarlar.",
+                "🪓 <b>Biliyor muydunuz?</b> Evinizin ışıklarını kapatmak sizi görünmez yapmaz, sadece termal kameralı avcılar için işi kolaylaştırır.",
+                "🪓 <b>Biliyor muydunuz?</b> Sabah sirenleri çaldığında işlenen cinayetler yasadır, siren çaldıktan 1 saniye sonraki cinayet ise birinci derece suçtur."
+            ]
+        }
+        
+        facts_list = fun_facts.get(scenario, ["⏳ Hazırlıklar sürüyor..."] * 3)
+        chosen_facts = random.sample(facts_list, 3) if len(facts_list) >= 3 else facts_list
+
+        # 0. Saniye - İlk Bilgi
+        try:
+            await context.bot.send_message(chat_id, chosen_facts[0], parse_mode='HTML')
+        except Exception: pass
+        await asyncio.sleep(15)
+
+        # 15. Saniye - İkinci Bilgi
         game_check = RPG_GAMES.get(chat_id)
         if game_check and game_check["status"] == "waiting_players":
             try:
-                await context.bot.send_message(chat_id, "⏳ <b>Oyuna katılmak için SON 30 SANİYE!</b>", parse_mode='HTML')
-            except Exception:
-                pass
+                await context.bot.send_message(chat_id, chosen_facts[1], parse_mode='HTML')
+            except Exception: pass
+        await asyncio.sleep(15)
+
+        # 30. Saniye - Üçüncü Bilgi ve Uyarı
+        game_check = RPG_GAMES.get(chat_id)
+        if game_check and game_check["status"] == "waiting_players":
+            try:
+                msg_text = chosen_facts[2] + "\n\n⏳ <b>Oyuna katılmak için SON 15 SANİYE!</b>"
+                await context.bot.send_message(chat_id, msg_text, parse_mode='HTML')
+            except Exception: pass
                 
-        # Katılım için kalan 30 saniye
-        await asyncio.sleep(30) 
+        # Katılım için son 15 saniye beklemesi
+        await asyncio.sleep(15) 
         
         game = RPG_GAMES.get(chat_id)
         if not game or len(game["players"]) < 3:
@@ -318,22 +390,21 @@ async def run_rpg_game(chat_id, context):
             
         game["status"] = "playing"
         players = game["players"]
-        scenario = game["scenario"]
         
         scenario_desc = scenario
         if "Arınma" in scenario:
-            scenario_desc = "Arınma Gecesi (Herkesin birbirini acımasızca avladığı, yasanın olmadığı, kıyamet benzeri ölümcül bir gece)"
+            scenario_desc = "Arınma Gecesi (Herkesin birbirini acımasızca avladığı, yasanın olmadığı, ölümcül bir gece)"
         
-        # Puan Havuzu (Katılımcı sayısıyla orantılı max 100)
+        # Puan Havuzu ve Dinamik Tur
         total_pool = min(100, len(players) * 20)
-        round_points = {
-            1: int(total_pool * 0.1),
-            2: int(total_pool * 0.2),
-            3: int(total_pool * 0.3),
-            4: int(total_pool * 0.4)
-        }
+        total_rounds = max(4, len(players))
         
-        for round_num in range(1, 5):
+        round_points = {}
+        weight_sum = sum(range(1, total_rounds + 1))
+        for r in range(1, total_rounds + 1):
+            round_points[r] = int((total_pool / weight_sum) * r)
+        
+        for round_num in range(1, total_rounds + 1):
             game["round"] = round_num
             
             alive_players = [p for p in players.values() if p["status"] == "alive"]
@@ -341,7 +412,7 @@ async def run_rpg_game(chat_id, context):
                 await context.bot.send_message(chat_id, "💀 <b>Oyun Bitti!</b> Herkes öldü... Kimse hayatta kalamadı.", parse_mode="HTML")
                 break
                 
-            is_final_round = (round_num == 4 or len(alive_players) <= 1)
+            is_final_round = (round_num == total_rounds or len(alive_players) <= 1)
                 
             actions_text = ""
             if round_num > 1:
@@ -355,13 +426,17 @@ async def run_rpg_game(chat_id, context):
             # Sadece HAYATTA OLAN oyunculari string olarak birlestir
             alive_player_identities = ", ".join([f"{p['name']} (ID: {uid})" for uid, p in players.items() if p["status"] == "alive"])
 
+            dead_context = f"\n\nÖNEMLİ KURAL 1: Önceki Turda Ölenler/Elenenler: {', '.join(game['just_died'])}. Onların nasıl öldüklerini ya da elendiklerini alt alta bir liste halinde YAZMA. Hikayenin akışı içine yedirerek, doğal bir anlatımla ve seçimlerini tiye alarak onlarla dalga geç. Mutlaka HTML formatında etiketle." if game.get("just_died") else ""
+
             if not is_final_round:
                 if round_num == 1:
-                    prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Hayatta Olan Katılımcılar ve ID'leri: {alive_player_identities}. Oyuncular birbirleriyle sıkı etkileşimde olsunlar. Her biri ayrı bir yerde başlamak yerine, başlangıçtan itibaren birbirlerine yakın olsunlar ve senaryo ilerledikçe ortak krizlere birlikte tepki versinler. Acımasız ve edebi bir Dungeon Master gibi anlat.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30 İLA 40 KELİME ARASI kullan. Katılımcıların durumunu hikayeleştirerek açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini senaryo içinde geçirirken kalın (b etiketi) YAZMA, mutlaka şu HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Eğer katılımcılar arasında 'cıtkırıldı' isimli biri varsa, bu kişi senaryo gereği dahi olsa 'zenithar' hariç kimsenin elini tutamaz ve kimseye temas edemez."
+                    prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Hayatta Olan Katılımcılar ve ID'leri: {alive_player_identities}. Oyuncuların hepsi yan yana başlamasın. Şansa bağlı olarak bazıları yan yana başlasın ama bu her zaman avantajlarına olmasın, bazıları birbirinden ayrı veya ölümcül derecede tehlikeli konumlarda olsun. Acımasız ve edebi bir Dungeon Master gibi anlat.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30-40 kelime kullan. Katılımcıların durumunu hikayeleştirerek açıklamak için HER BİRİNE MİNİMUM 35 MAKSİMUM 45 KELİME kullan. Katılımcı isimlerini senaryo içinde mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Eğer katılımcılar arasında 'cıtkırıldı' isimli biri varsa, bu kişi senaryo gereği dahi olsa 'zenithar' hariç kimsenin elini tutamaz ve kimseye temas edemez."
+                elif round_num == 3:
+                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MİNİMUM 35 MAKSİMUM 45 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Bu turda tüm hayatta kalanları ilgilendiren kritik bir yol ayrımı/olay yarat ve onlara ne yapacaklarına karar vermeleri için senaryoya uygun A, B, C, D, E olmak üzere tam 5 ŞIKLI bir anket metni oluştur. (Kullanıcılar serbest hamle yazmak yerine bu tur şıklardan birini seçecekler). Katılımcı isimlerini mutlaka HTML formatında etiketle. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: 'cıtkırıldı' isimli biri varsa, 'zenithar' hariç kimsenin elini tutamaz."
                 else:
-                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve yaptıkları hamleler:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları veya 'eylemsiz kaldı' diyenleri acımasızca ÖLDÜR veya trajik şekilde elenmesini sağla. Mantıklı olanları yaşat ve yeni bir ölümcül kriz yarat. Oyuncuların ortak hareket etmesini veya birbirleriyle etkileşimde kalmasını sağla.\n\nÖNEMLİ KURAL: Ortamdaki yeni krizi ve atmosferi açıklamak için 30 İLA 40 KELİME ARASI kullan. Katılımcıların durumunu açıklamak için MAKSİMUM 30 KELİME kullan. Katılımcı isimlerini senaryo içinde geçirirken kalın (b etiketi) YAZMA, mutlaka şu HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). Alt satırdan hikayeyi anlat. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Eğer katılımcılar arasında 'cıtkırıldı' isimli biri varsa, bu kişi senaryo gereği dahi olsa 'zenithar' hariç kimsenin elini tutamaz ve kimseye temas edemez."
+                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR ve yeni bir ölümcül kriz yarat.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MİNİMUM 35 MAKSİMUM 45 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Katılımcı isimlerini mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: 'cıtkırıldı' isimli biri varsa, 'zenithar' hariç kimsenin elini tutamaz."
             else:
-                prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler KESİNLİKLE hikayede yer alamaz.\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat.\n\nÖNEMLİ KURAL: Tüm final anlatımını MAKSİMUM 120 KELİME kullanarak yap. Katılımcı isimlerini senaryo içinde geçirirken kalın (b etiketi) YAZMA, mutlaka şu HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA ölenlerin isimlerini (etiketsiz, düz metin) 'ÖLENLER: isim1, isim2' şeklinde yaz. Alt satırdan finali anlat. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Eğer katılımcılar arasında 'cıtkırıldı' isimli biri varsa, bu kişi senaryo gereği dahi olsa 'zenithar' hariç kimsenin elini tutamaz ve kimseye temas edemez."
+                prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler KESİNLİKLE hikayede yer alamaz.\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat.{dead_context}\n\nÖNEMLİ KURAL 2: Tüm final anlatımını MAKSİMUM 120 KELİME kullanarak yap. Katılımcı isimlerini HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA ölenlerin isimlerini (etiketsiz, düz metin) 'ÖLENLER: isim1, isim2' şeklinde yaz. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: 'cıtkırıldı' isimli biri varsa, 'zenithar' hariç kimsenin elini tutamaz."
                 
             try:
                 res = await safe_generate(
@@ -381,6 +456,8 @@ async def run_rpg_game(chat_id, context):
                 break
 
             display_text = text
+            previously_alive = [uid for uid, p in players.items() if p["status"] == "alive"]
+
             if "ÖLENLER:" in text.upper():
                 lines = text.split('\n')
                 dead_line = ""
@@ -396,7 +473,11 @@ async def run_rpg_game(chat_id, context):
                 
                 display_text = "\n".join([l for l in lines if not l.upper().startswith("ÖLENLER:")]).strip()
 
-            current_alive_after_round = [uid for uid, p in players.items() if p["status"] == "alive"]
+            currently_alive = [uid for uid, p in players.items() if p["status"] == "alive"]
+            just_died_uids = [uid for uid in previously_alive if uid not in currently_alive]
+            game["just_died"] = [f"<a href='tg://user?id={uid}'>{html.escape(players[uid]['name'])}</a>" for uid in just_died_uids]
+
+            current_alive_after_round = currently_alive
             pts_to_add = round_points.get(round_num, 0)
             
             if is_final_round and len(current_alive_after_round) == 2:
@@ -410,8 +491,6 @@ async def run_rpg_game(chat_id, context):
                 game["round_points_log"][uid] += pts_to_add
 
             display_text = display_text.replace('&lt;a href=', '<a href=').replace('&lt;/a&gt;', '</a>').replace('\"&gt;', '">').replace('\'&gt;', "'>")
-            
-            # Fallback for remaining unparsed tags just in case
             display_text = display_text.replace('&lt;b&gt;', '<b>').replace('&lt;/b&gt;', '</b>').replace('&lt;strong&gt;', '<b>').replace('&lt;/strong&gt;', '</b>')
 
             current_alive_formatted = [f"<a href='tg://user?id={uid}'>{html.escape(players[uid]['name'])}</a>" for uid in current_alive_after_round]
@@ -430,7 +509,7 @@ async def run_rpg_game(chat_id, context):
             
             image_url = f"https://image.pollinations.ai/prompt/{eng_scen}_round_{round_num}?width=800&height=400&nologo=true"
             
-            msg_text = f"🎲 <b>TUR {round_num}/4</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 60 saniye. Hamlenizi yapmak için bota ait BU MESAJI YANITLAYIN (Reply)!</i>"
+            msg_text = f"🎲 <b>TUR {round_num}/{total_rounds}</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 60 saniye. Hamlenizi yapmak için bota ait BU MESAJI YANITLAYIN (Reply)!</i>"
             if is_final_round:
                 scoreboard = "\n\n🏆 <b>OYUN SONU PUANLARI:</b>\n"
                 for uid, p in players.items():
