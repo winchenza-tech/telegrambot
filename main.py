@@ -13,7 +13,7 @@ from collections import deque
 from flask import Flask
 from threading import Thread
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, CallbackQueryHandler
+from telegram.ext import ApplicationBuilder, ContextTypes, MessageHandler, filters, CallbackQueryHandler, PollAnswerHandler
 from google import genai
 from google.genai import types
 
@@ -70,6 +70,7 @@ MESSAGE_LOOKUP = {}
 # --- RPG OYUN DURUMU VE PUAN TABLOSU ---
 RPG_GAMES = {}
 RPG_SCORES = {} 
+RPG_POLLS = {}  # Anket yakalayıcı hafıza
 
 # --- 2. YARDIMCI FONKSİYONLAR ---
 
@@ -169,7 +170,7 @@ async def rpgpuan_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     sorted_scores = sorted(RPG_SCORES.values(), key=lambda x: x["score"], reverse=True)
     
-    text = "🏆 <b>RPG HAYATTA KALMA SIRALAMASI</b> 🏆\n\n"
+    text = "🏆 <b>ZenithaRPG HAYATTA KALMA SIRALAMASI</b> 🏆\n\n"
     for i, p in enumerate(sorted_scores):
         if i == 0: emoji = "⚔️"
         elif i == 1: emoji = "🛡️"
@@ -225,7 +226,7 @@ async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🪓 Arınma Gecesi", callback_data="rpg_scen_arinma")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🎲 Mini RPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
+    await update.message.reply_text("🎲 ZenithaRPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
 
 async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -395,7 +396,6 @@ async def run_rpg_game(chat_id, context):
         if "Arınma" in scenario:
             scenario_desc = "Arınma Gecesi (Herkesin birbirini acımasızca avladığı, yasanın olmadığı, ölümcül bir gece)"
         
-        # Puan Havuzu ve Dinamik Tur
         total_pool = min(100, len(players) * 20)
         total_rounds = max(4, len(players))
         
@@ -409,7 +409,7 @@ async def run_rpg_game(chat_id, context):
             
             alive_players = [p for p in players.values() if p["status"] == "alive"]
             if len(alive_players) == 0:
-                await context.bot.send_message(chat_id, "💀 <b>Oyun Bitti!</b> Herkes öldü... Kimse hayatta kalamadı.", parse_mode="HTML")
+                await context.bot.send_message(chat_id, "💀 <b>Oyun Bitti!</b> Herkes öldü... Kimse hayatta kalamadı. Mallar.", parse_mode="HTML")
                 break
                 
             is_final_round = (round_num == total_rounds or len(alive_players) <= 1)
@@ -423,18 +423,20 @@ async def run_rpg_game(chat_id, context):
             game["recorded_actions"] = [] 
             for uid in players: players[uid]["action"] = None
 
-            # Sadece HAYATTA OLAN oyunculari string olarak birlestir
             alive_player_identities = ", ".join([f"{p['name']} (ID: {uid})" for uid, p in players.items() if p["status"] == "alive"])
 
             dead_context = f"\n\nÖNEMLİ KURAL 1: Önceki Turda Ölenler/Elenenler: {', '.join(game['just_died'])}. Onların nasıl öldüklerini ya da elendiklerini alt alta bir liste halinde YAZMA. Hikayenin akışı içine yedirerek, doğal bir anlatımla ve seçimlerini tiye alarak onlarla dalga geç. Mutlaka HTML formatında etiketle." if game.get("just_died") else ""
+            
+            elimination_rule = "\n\nÖNEMLİ KURAL 4: Katılımcı sayısı 7'nin altında olduğu için, bu turda zorunlu olarak SADECE VE TAM OLARAK 1 kişiyi öldür/ele." if len(players) < 7 else ""
 
             if not is_final_round:
                 if round_num == 1:
-                    prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Hayatta Olan Katılımcılar ve ID'leri: {alive_player_identities}. Oyuncuların hepsi yan yana başlamasın. Şansa bağlı olarak bazıları yan yana başlasın ama bu her zaman avantajlarına olmasın, bazıları birbirinden ayrı veya ölümcül derecede tehlikeli konumlarda olsun. Acımasız ve edebi bir Dungeon Master gibi anlat.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30-40 kelime kullan. Katılımcıların durumunu hikayeleştirerek açıklamak için HER BİRİNE MAKSİMUM 40 KELİME kullan. Katılımcı isimlerini senaryo içinde mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak."
+                    dead_instruction = "Yanıtının EN BAŞINA bu turda ölen/elenen kişinin ismini (etiketsiz, sadece düz metin olarak) 'ÖLENLER: isim' şeklinde yaz" if len(players) < 7 else "Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz"
+                    prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Hayatta Olan Katılımcılar ve ID'leri: {alive_player_identities}. Oyuncuların hepsi yan yana başlamasın. Şansa bağlı olarak bazıları yan yana başlasın ama bu her zaman avantajlarına olmasın, bazıları birbirinden ayrı veya ölümcül derecede tehlikeli konumlarda olsun. Acımasız ve edebi bir Dungeon Master gibi anlat.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30-40 kelime kullan. Katılımcıların durumunu hikayeleştirerek açıklamak için HER BİRİNE MAKSİMUM 40 KELİME kullan. Katılımcı isimlerini senaryo içinde mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. {dead_instruction} ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
                 elif round_num == 3:
-                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Bu turda tüm hayatta kalanları ilgilendiren kritik bir yol ayrımı/olay yarat ve onlara ne yapacaklarına karar vermeleri için senaryoya uygun A, B, C, D, E olmak üzere tam 5 ŞIKLI bir anket metni oluştur. (Kullanıcılar serbest hamle yazmak yerine bu tur şıklardan birini seçecekler). Katılımcı isimlerini mutlaka HTML formatında etiketle. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak."
+                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Bu turda tüm hayatta kalanları ilgilendiren kritik bir yol ayrımı yarat. Hikayenin EN SONUNA Telegram anketi oluşturulması için tam şu formatta 1 soru ve 5 kısa şık ekle (Başka hiçbir şey yazma):\n[ANKET SORU]: Soru metni\n[ŞIK 1]: Şık 1\n[ŞIK 2]: Şık 2\n[ŞIK 3]: Şık 3\n[ŞIK 4]: Şık 4\n[ŞIK 5]: Şık 5\n\nKatılımcı isimlerini mutlaka HTML formatında etiketle. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
                 else:
-                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR ve yeni bir ölümcül kriz yarat.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Katılımcı isimlerini mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak."
+                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR ve yeni bir ölümcül kriz yarat.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Katılımcı isimlerini mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
             else:
                 prompt = f"Senaryo: {scenario_desc}. FİNAL TURU! Kalanlar ve Hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler KESİNLİKLE hikayede yer alamaz.\n\nBu turda ZORUNLU OLARAK sadece 1 kişi (veya %30 ihtimalle 2 kişi) hayatta kalabilir. Diğerlerini destansı şekilde öldür. Kazanan(lar)ı ve senaryonun sonunu görkemli şekilde anlat.{dead_context}\n\nÖNEMLİ KURAL 2: Tüm final anlatımını MAKSİMUM 120 KELİME kullanarak yap. Katılımcı isimlerini HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA ölenlerin isimlerini (etiketsiz, düz metin) 'ÖLENLER: isim1, isim2' şeklinde yaz. ASLA yıldız(*) kullanma.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak."
                 
@@ -456,10 +458,29 @@ async def run_rpg_game(chat_id, context):
                 break
 
             display_text = text
+            poll_question = None
+            poll_options = []
+            
+            if round_num == 3:
+                lines = display_text.split('\n')
+                new_lines = []
+                for line in lines:
+                    clean_line = line.strip()
+                    if clean_line.startswith("[ANKET SORU]:"):
+                        poll_question = clean_line.replace("[ANKET SORU]:", "").strip()[:290]
+                    elif clean_line.startswith("[ŞIK 1]:"): poll_options.append(clean_line.replace("[ŞIK 1]:", "").strip()[:95])
+                    elif clean_line.startswith("[ŞIK 2]:"): poll_options.append(clean_line.replace("[ŞIK 2]:", "").strip()[:95])
+                    elif clean_line.startswith("[ŞIK 3]:"): poll_options.append(clean_line.replace("[ŞIK 3]:", "").strip()[:95])
+                    elif clean_line.startswith("[ŞIK 4]:"): poll_options.append(clean_line.replace("[ŞIK 4]:", "").strip()[:95])
+                    elif clean_line.startswith("[ŞIK 5]:"): poll_options.append(clean_line.replace("[ŞIK 5]:", "").strip()[:95])
+                    else:
+                        new_lines.append(line)
+                display_text = "\n".join(new_lines).strip()
+
             previously_alive = [uid for uid, p in players.items() if p["status"] == "alive"]
 
             if "ÖLENLER:" in text.upper():
-                lines = text.split('\n')
+                lines = display_text.split('\n')
                 dead_line = ""
                 for line in lines:
                     if line.upper().startswith("ÖLENLER:"):
@@ -509,15 +530,17 @@ async def run_rpg_game(chat_id, context):
             
             image_url = f"https://image.pollinations.ai/prompt/{eng_scen}_round_{round_num}?width=800&height=400&nologo=true"
             
-            msg_text = f"🎲 <b>TUR {round_num}/{total_rounds}</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 75 saniye. Hamlenizi yapmak için bota ait BU MESAJI YANITLAYIN (Reply)!</i>"
-            if is_final_round:
+            if round_num == 3 and poll_question and len(poll_options) >= 2:
+                msg_text = f"🎲 <b>TUR {round_num}/{total_rounds}</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 30 saniye. Lütfen hemen aşağıya gönderilen ANKETİ yanıtlayın!</i>"
+            elif is_final_round:
                 scoreboard = "\n\n🏆 <b>OYUN SONU PUANLARI:</b>\n"
                 for uid, p in players.items():
                     puan = game["round_points_log"].get(uid, 0)
                     durum = "🎉 Kazandı!" if p["status"] == "alive" else "💀 Öldü"
                     scoreboard += f"- {html.escape(p['name'])}: +{puan} Puan ({durum})\n"
-                    
                 msg_text = f"🚨 <b>FİNAL SONUCU</b>\n\n{display_text}\n\n{alive_tags_text}{scoreboard}"
+            else:
+                msg_text = f"🎲 <b>TUR {round_num}/{total_rounds}</b>\n\n{display_text}\n\n{alive_tags_text}\n\n⏳ <i>Süreniz 75 saniye. Hamlenizi yapmak için bota ait BU MESAJI YANITLAYIN (Reply)!</i>"
 
             game["current_caption"] = msg_text
 
@@ -535,20 +558,49 @@ async def run_rpg_game(chat_id, context):
                 
             game["last_message_id"] = msg.message_id
             
+            # 3. Tur Anketi Gönderimi
+            if round_num == 3 and poll_question and len(poll_options) >= 2:
+                try:
+                    poll_msg = await context.bot.send_poll(
+                        chat_id=chat_id,
+                        question=poll_question,
+                        options=poll_options,
+                        is_anonymous=False
+                    )
+                    RPG_POLLS[poll_msg.poll.id] = {
+                        "chat_id": chat_id,
+                        "options": poll_options
+                    }
+                except Exception as e:
+                    print(f"Anket yollama hatası: {e}")
+            
             if not is_final_round:
-                # Hamle için ilk 45 saniye
-                await asyncio.sleep(45) 
-                
-                # 30 Saniye uyarısı (45 + 30 = 75 total sleep)
-                game_check = RPG_GAMES.get(chat_id)
-                if game_check and game_check["status"] == "playing" and game_check["round"] == round_num:
-                    try:
-                        await context.bot.send_message(chat_id, "⏳ <b>Hamlenizi yapmak için SON 30 SANİYE!</b> Mesajı yanıtlamayı (reply) unutmayın!", parse_mode='HTML')
-                    except Exception:
-                        pass
-                
-                # Hamle için kalan 30 saniye
-                await asyncio.sleep(30)
+                if round_num == 3 and poll_question and len(poll_options) >= 2:
+                    # Anketli tur için 30 saniye bekleme
+                    await asyncio.sleep(15)
+                    game_check = RPG_GAMES.get(chat_id)
+                    if game_check and game_check["status"] == "playing" and game_check["round"] == round_num:
+                        try:
+                            uyari_metni = "⏳ <b>Anketi yanıtlamak için SON 15 SANİYE!</b>"
+                            await context.bot.send_message(chat_id, uyari_metni, parse_mode='HTML')
+                        except Exception:
+                            pass
+                    await asyncio.sleep(15)
+                else:
+                    # Hamle için ilk 45 saniye
+                    await asyncio.sleep(45) 
+                    
+                    # 30 Saniye uyarısı
+                    game_check = RPG_GAMES.get(chat_id)
+                    if game_check and game_check["status"] == "playing" and game_check["round"] == round_num:
+                        try:
+                            uyari_metni = "⏳ <b>Hamlenizi yapmak için SON 30 SANİYE!</b> Mesajı yanıtlamayı (reply) unutmayın!"
+                            await context.bot.send_message(chat_id, uyari_metni, parse_mode='HTML')
+                        except Exception:
+                            pass
+                    
+                    # Hamle için kalan 30 saniye
+                    await asyncio.sleep(30)
             else:
                 break # is_final_round tetiklendiyse döngüden çık
         
@@ -559,6 +611,37 @@ async def run_rpg_game(chat_id, context):
         print(f"Kritik Oyun Hatası: {e}")
         await context.bot.send_message(chat_id, f"⚠️ Oyun motorunda kritik bir hata oluştu ve oyun iptal edildi.\nHata detayı: {e}")
         RPG_GAMES.pop(chat_id, None)
+
+# ANKET CEVAP YAKALAYICI (3. Tur İçin)
+async def poll_answer_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    answer = update.poll_answer
+    poll_id = answer.poll_id
+    user_id = answer.user.id
+    
+    if poll_id in RPG_POLLS:
+        chat_id = RPG_POLLS[poll_id]["chat_id"]
+        options = RPG_POLLS[poll_id]["options"]
+        
+        if chat_id in RPG_GAMES:
+            game = RPG_GAMES[chat_id]
+            if game["status"] == "playing" and user_id in game["players"]:
+                if game["players"][user_id]["status"] == "alive":
+                    selected_opts = [options[i] for i in answer.option_ids]
+                    if selected_opts:
+                        action_text = "Anket Seçimi: " + ", ".join(selected_opts)
+                        if game["players"][user_id]["action"] is None:
+                            game["players"][user_id]["action"] = action_text
+                            user_name = game["players"][user_id]["name"]
+                            game["recorded_actions"].append(user_name)
+                            
+                            new_caption = game["current_caption"] + "\n\n✅ <b>Hamlesi Kaydedilenler:</b> " + ", ".join(game["recorded_actions"])
+                            try:
+                                if game["is_photo_msg"]:
+                                    await context.bot.edit_message_caption(chat_id=chat_id, message_id=game["last_message_id"], caption=new_caption, parse_mode='HTML')
+                                else:
+                                    await context.bot.edit_message_text(chat_id=chat_id, message_id=game["last_message_id"], text=new_caption, parse_mode='HTML')
+                            except Exception:
+                                pass
 
 # CANLI MESAJ YAKALAYICI
 async def log_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -924,6 +1007,7 @@ async def main():
     application.add_handler(MessageHandler(interaction_filter & (~allowed_filter), reject_unauthorized))
     
     application.add_handler(CallbackQueryHandler(rpg_callback, pattern='^rpg_'))
+    application.add_handler(PollAnswerHandler(poll_answer_handler))
     
     # Komutlar
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/rpgpuan'), rpgpuan_command))
