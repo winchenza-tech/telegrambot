@@ -43,7 +43,7 @@ nest_asyncio.apply()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-MODEL_NAME = 'gemini-3-flash'
+MODEL_NAME = 'gemini-3.1-flash-lite-preview'
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # HAFIZA, KİLİT VE GÖREV (TASK) SİSTEMİ
@@ -225,7 +225,7 @@ async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🪓 Arınma Gecesi", callback_data="rpg_scen_arinma")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("🎲 ZenithaRPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
+    await update.message.reply_text("🎲 Mini RPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
 
 async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -296,7 +296,20 @@ async def rpg_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def run_rpg_game(chat_id, context):
     try:
-        await asyncio.sleep(60) 
+        # Katılım için ilk 30 saniye
+        await asyncio.sleep(30)
+        
+        # 30 saniye uyarısı
+        game_check = RPG_GAMES.get(chat_id)
+        if game_check and game_check["status"] == "waiting_players":
+            try:
+                await context.bot.send_message(chat_id, "⏳ <b>Oyuna katılmak için SON 30 SANİYE!</b>", parse_mode='HTML')
+            except Exception:
+                pass
+                
+        # Katılım için kalan 30 saniye
+        await asyncio.sleep(30) 
+        
         game = RPG_GAMES.get(chat_id)
         if not game or len(game["players"]) < 3:
             await context.bot.send_message(chat_id, "😢 Yeterli katılımcı sağlanamadı (Minimum 3 kişi gerekiyor). RPG oyunu iptal edildi.")
@@ -440,7 +453,19 @@ async def run_rpg_game(chat_id, context):
             game["last_message_id"] = msg.message_id
             
             if round_num < 4:
-                await asyncio.sleep(90) 
+                # Hamle için ilk 60 saniye
+                await asyncio.sleep(60) 
+                
+                # 30 Saniye uyarısı
+                game_check = RPG_GAMES.get(chat_id)
+                if game_check and game_check["status"] == "playing" and game_check["round"] == round_num:
+                    try:
+                        await context.bot.send_message(chat_id, "⏳ <b>Hamlenizi yapmak için SON 30 SANİYE!</b> Mesajı yanıtlamayı (reply) unutmayın!", parse_mode='HTML')
+                    except Exception:
+                        pass
+                
+                # Hamle için kalan 30 saniye
+                await asyncio.sleep(30)
         
         await asyncio.sleep(2) 
         RPG_GAMES.pop(chat_id, None)
@@ -758,8 +783,10 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     secilenler = random.sample(TAROT_CARDS, 3)
     status = await update.message.reply_text("🃏 Kartlar karıştırılıyor...")
-    try:
-        res = await safe_generate(
+    
+    # Eşzamanlı arka plan görevi başlatılıyor
+    async def fetch_tarot():
+        return await safe_generate(
             contents=f"Tarot kartları: {', '.join(secilenler)}. Geçmiş, şimdi ve geleceği ayrı paragraflarda yorumla. Daha samimi, candan ve içten bir dil kullan. Maksimum 120 kelime kullan ama asla yıldız işareti(*) kullanma. Her paragrafın başına o paragrafa uygun bir emoji ekle.",
             config=types.GenerateContentConfig(
                 safety_settings=[
@@ -770,8 +797,29 @@ async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 ]
             )
         )
+
+    gen_task = asyncio.create_task(fetch_tarot())
+    
+    # 4 adımlı 3'er saniyelik mistik mesaj dizisi
+    steps = [
+        "🌌 Kutsal enerjiler kartlara aktarılıyor...",
+        "✨ Ruhani boyutta bağ kuruluyor...",
+        "👁️ Geçmiş, şimdi ve gelecek için üç kart çekiliyor...",
+        "🔮 Kaderin gizemli fısıltıları dinleniyor..."
+    ]
+    
+    for step in steps:
+        await asyncio.sleep(3)
+        try:
+            await status.edit_text(step)
+        except Exception:
+            pass # Eğer aynı yazıyı düzenlemeye çalışırsa veya telegram hata verirse es geç
+            
+    try:
+        res = await gen_task
         await status.edit_text(f"🔮 TAROT FALI:\n\n🃏 Seçilen Kartlar: {', '.join(secilenler)}\n\n{res.text}")
-    except: await status.edit_text("Tüh bağlantı koptu (Sistem yoğun).")
+    except Exception as e: 
+        await status.edit_text(f"Tüh bağlantı koptu (Sistem yoğun).\n\nHata Detayı: `{e}`")
 
 async def main():
     keep_alive()
@@ -815,3 +863,5 @@ if __name__ == "__main__":
         asyncio.run(main())
     except Exception as e: 
         print(f"Kritik Hata: {e}")
+
+```
