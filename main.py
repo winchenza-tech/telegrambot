@@ -239,8 +239,7 @@ async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # DİKKAT: Yüklediğin görselin tam linkini buradaki tırnakların arasına yapıştırmalısın.
-    MENU_GORSEL_LINKI = "https://i.ibb.co/TBbwnvrn/MG-1776.jpg" # Örnek Link - Kendi yüklediğin linkle değiştir!
+    MENU_GORSEL_LINKI = "https://i.ibb.co/TBbwnvrn/MG-1776.jpg" 
     
     try:
         await context.bot.send_photo(
@@ -251,7 +250,6 @@ async def rpg_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode='HTML'
         )
     except Exception:
-        # Eğer resim linki kırılırsa veya hata verirse bot çökmesin, eski düzende mesaj atsın
         await update.message.reply_text("🎲 ZenithaRPG Oyununa Hoş Geldiniz!\n\nLütfen oynamak istediğiniz senaryoyu seçin:", reply_markup=reply_markup)
 
 
@@ -452,15 +450,17 @@ async def run_rpg_game(chat_id, context):
             dead_context = f"\n\nÖNEMLİ KURAL 1: Önceki Turda Ölenler/Elenenler: {', '.join(game['just_died'])}. Onların nasıl öldüklerini ya da elendiklerini alt alta bir liste halinde YAZMA. Hikayenin akışı içine yedirerek, doğal bir anlatımla ve seçimlerini tiye alarak onlarla dalga geç. Mutlaka HTML formatında etiketle." if game.get("just_died") else ""
             
             elimination_rule = "\n\nÖNEMLİ KURAL 4: Katılımcı sayısı 7'nin altında olduğu için, bu turda zorunlu olarak SADECE VE TAM OLARAK 1 kişiyi öldür/ele." if len(players) < 7 else ""
+            
+            kriz_kurali = "\n\nÖNEMLİ KURAL 5: SADECE tüm oyuncuları ilgilendiren genel senaryo krizlerinde (deprem, elektrik kesintisi vb.) durumu BÜYÜK HARFLERLE ve <b>KRİZ: ...</b> şeklinde HTML etiketiyle yaz. Oyuncuların bireysel durumlarını ve isimlerini yazarken KESİNLİKLE kriz etiketi kullanma, onları eskisi gibi normal yaz."
 
             if not is_final_round:
                 if round_num == 1:
-                    dead_instruction = "Yanıtının EN BAŞINA bu turda ölen/elenen kişinin ismini (etiketsiz, sadece düz metin olarak) 'ÖLENLER: isim' şeklinde yaz" if len(players) < 7 else "Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz"
-                    prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Hayatta Olan Katılımcılar ve ID'leri: {alive_player_identities}. Oyuncuların hepsi yan yana başlamasın. Şansa bağlı olarak bazıları yan yana başlasın ama bu her zaman avantajlarına olmasın, bazıları birbirinden ayrı veya ölümcül derecede tehlikeli konumlarda olsun. Acımasız ve edebi bir Dungeon Master gibi anlat.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30-40 kelime kullan. Katılımcıların durumunu hikayeleştirerek açıklamak için HER BİRİNE MAKSİMUM 40 KELİME kullan. Katılımcı isimlerini senaryo içinde mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. {dead_instruction} ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma.\n\nÖNEMLİ KURAL 5: Kriz durumlarını, felaketleri veya önemli gelişmeleri KESİNLİKLE BÜYÜK HARFLERLE ve HTML <b>KRİZ: ...</b> etiketiyle kalın yaz.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
+                    dead_instruction = "Yanıtının EN BAŞINA 'ÖLENLER: Yok' yaz"
+                    prompt = f"RPG Oyunu Başlıyor. Senaryo: {scenario_desc}. Hayatta Olan Katılımcılar ve ID'leri: {alive_player_identities}. Oyuncuların hepsi yan yana başlamasın. Şansa bağlı olarak bazıları yan yana başlasın ama bu her zaman avantajlarına olmasın, bazıları birbirinden ayrı veya ölümcül derecede tehlikeli konumlarda olsun. Acımasız ve edebi bir Dungeon Master gibi anlat.\n\nÖNEMLİ KURAL: Senaryodaki dünyayı ve ortamı açıklamak için 30-40 kelime kullan. Katılımcıların durumunu hikayeleştirerek açıklamak için HER BİRİNE MAKSİMUM 40 KELİME kullan. Katılımcı isimlerini senaryo içinde mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. {dead_instruction} ve alt satırdan hikayeye başla. ASLA yıldız(*) kullanma.{kriz_kurali}\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak."
                 elif round_num == 3:
-                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Bu turda tüm hayatta kalanları ilgilendiren kritik bir yol ayrımı yarat. Hikayenin EN SONUNA Telegram anketi oluşturulması için tam şu formatta 1 soru ve 5 kısa şık ekle (Başka hiçbir şey yazma):\n[ANKET SORU]: Soru metni\n[ŞIK 1]: Şık 1\n[ŞIK 2]: Şık 2\n[ŞIK 3]: Şık 3\n[ŞIK 4]: Şık 4\n[ŞIK 5]: Şık 5\n\nKatılımcı isimlerini mutlaka HTML formatında etiketle. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖNEMLİ KURAL 5: Kriz durumlarını, felaketleri veya önemli gelişmeleri KESİNLİKLE BÜYÜK HARFLERLE ve HTML <b>KRİZ: ...</b> etiketiyle kalın yaz.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
+                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Bu turda tüm hayatta kalanları ilgilendiren kritik bir yol ayrımı yarat. Hikayenin EN SONUNA Telegram anketi oluşturulması için tam şu formatta 1 soru ve 5 kısa şık ekle (Başka hiçbir şey yazma):\n[ANKET SORU]: Soru metni\n[ŞIK 1]: Şık 1\n[ŞIK 2]: Şık 2\n[ŞIK 3]: Şık 3\n[ŞIK 4]: Şık 4\n[ŞIK 5]: Şık 5\n\nKatılımcı isimlerini mutlaka HTML formatında etiketle. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.{kriz_kurali}\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
                 else:
-                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR ve yeni bir ölümcül kriz yarat.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Katılımcı isimlerini mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.\n\nÖNEMLİ KURAL 5: Kriz durumlarını, felaketleri veya önemli gelişmeleri KESİNLİKLE BÜYÜK HARFLERLE ve HTML <b>KRİZ: ...</b> etiketiyle kalın yaz.\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
+                    prompt = f"Senaryo: {scenario_desc}. Tur: {round_num}. Hayatta kalanlar ve hamleleri:\n{actions_text}\nŞu an HAYATTA KALAN Katılımcılar ve ID'leri: {alive_player_identities}\n\nDİKKAT: Önceki turlarda ölenler bu turda KESİNLİKLE hiçbir eylem yapamaz veya hikayede yer alamaz.\n\nDeğerlendirme yap: Mantıksız hamle yapanları acımasızca ÖLDÜR ve yeni bir ölümcül kriz yarat.{dead_context}\n\nÖNEMLİ KURAL 2: Hayatta kalanların mevcut durumlarını HER BİRİ İÇİN MAKSİMUM 40 KELİME ile uzunca anlat.\n\nÖNEMLİ KURAL 3: Katılımcı isimlerini mutlaka HTML formatında etiketle: <a href=\"tg://user?id=KİŞİNİN_IDSİ\">Kişininİsmi</a>. Yanıtının EN BAŞINA bu turda ölenlerin isimlerini (etiketsiz, sadece düz metin olarak) virgülle ayırarak 'ÖLENLER: isim1, isim2' şeklinde yaz (Ölen yoksa ÖLENLER: Yok yaz). ASLA yıldız(*) kullanma.{kriz_kurali}\n\nÖZEL KURAL: Kimse kimse ile el ele tutuşmayacak, kimse kimse ile duygusal ya da fiziksel yakınlık kurmayacak.{elimination_rule}"
             else:
                 num_winners = 2 if random.random() < 0.30 else 1
                 num_winners = min(num_winners, len(alive_players))
@@ -513,9 +513,14 @@ async def run_rpg_game(chat_id, context):
                         break
                 
                 clean_dead_line = re.sub(r'<[^>]+>', '', dead_line).replace('<b>', '').replace('</b>', '').replace('<strong>', '').replace('</strong>', '')
+                
+                killed_names = [n.strip().lower() for n in clean_dead_line.replace("ÖLENLER:", "").replace("Ölenler:", "").split(",") if n.strip()]
+                
                 for uid, p in players.items():
-                    if p["name"].lower() in clean_dead_line.lower() and p["status"] == "alive":
-                        p["status"] = "dead"
+                    if p["status"] == "alive":
+                        p_name_lower = p["name"].lower()
+                        if any((p_name_lower in k_name or k_name in p_name_lower) for k_name in killed_names if k_name != 'yok' and k_name != 'hiçbiri'):
+                            p["status"] = "dead"
                 
                 display_text = "\n".join([l for l in lines if not l.upper().startswith("ÖLENLER:")]).strip()
 
@@ -977,14 +982,14 @@ Soru: [Anket Sorusu]
     for group_id in ALLOWED_GROUPS:
         try:
             f.seek(0)
-            await context.bot.send_photo(chat_id=group_id, photo=f, caption=f"📰 <b>HABER:</b>\n\n{temiz_metin}", parse_mode='HTML')
+            await context.bot.send_photo(chat_id=group_id, photo=f)
             await context.bot.send_poll(chat_id=group_id, question=question_text, options=safe_options, is_anonymous=False)
             success_count += 1
         except Exception as e:
             error_messages.append(f"❌ {group_id} ID'li gruba gönderilemedi: `{e}`")
     
     if success_count > 0: 
-        await status_msg.edit_text(f"✅ Haber ve anket {success_count} gruba başarıyla gönderildi!")
+        await status_msg.edit_text(f"✅ Haber görseli ve anket {success_count} gruba başarıyla gönderildi!")
     else: 
         await status_msg.edit_text(f"⚠️ Gönderim başarısız!\n" + "\n".join(error_messages))
 
