@@ -18,7 +18,7 @@ from google import genai
 from google.genai import types
 
 # --- 1. AYARLAR VE GLOBAL DEĞİŞKENLER ---
-UPDATE_HOUR = 2  
+UPDATE_HOUR = 1 
 ADMIN_IDS = [7094870780, 8639720888]  
 ALLOWED_GROUPS = [-1003938704852, -1003297262036] 
 
@@ -43,7 +43,7 @@ nest_asyncio.apply()
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN_SERVICES")  
 GOOGLE_API_KEY = os.environ.get("GOOGLE_API_KEY")
 
-MODEL_NAME = 'gemini-3.1-flash-lite-preview'
+MODEL_NAME = 'gemini-2.5-flash'
 client = genai.Client(api_key=GOOGLE_API_KEY)
 
 # HAFIZA, KİLİT VE GÖREV (TASK) SİSTEMİ
