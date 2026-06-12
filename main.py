@@ -1061,6 +1061,52 @@ async def ozetle_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await status_msg.edit_text(f"📝 ÖZET:\n\n{res.text}")
     except: await status_msg.edit_text("❌ Hata (Sistem yoğun).")
 
+# /soru KOMUTU (YENİ EKLENDİ)
+async def soru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await check_access(update): return
+    
+    target_msg = update.message.reply_to_message if update.message.reply_to_message else update.message
+    photo_obj = target_msg.photo[-1] if target_msg.photo else None
+    
+    metin = update.message.text or update.message.caption or ""
+    temiz_args = re.sub(r'(?i)^/soru(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip()
+    
+    if not temiz_args and not photo_obj:
+        await update.message.reply_text("❗ Lütfen bir soru sorun veya komutu bir görselle birlikte gönderin.")
+        return
+
+    if not temiz_args and photo_obj:
+        temiz_args = "Bu görseli analiz et ve detaylıca açıkla."
+
+    status_msg = await update.message.reply_text("🤔 Düşünüyorum...")
+
+    prompt = f"{temiz_args}\n\nÖNEMLİ KURAL: Lütfen cevabını kesinlikle maksimum 200 kelime ile sınırlandır. Daha kısa da olabilir ancak 200 kelimeyi geçme."
+    contents = [prompt]
+
+    try:
+        if photo_obj:
+            photo_file = await photo_obj.get_file()
+            f = io.BytesIO()
+            await photo_file.download_to_memory(f)
+            f.seek(0)
+            contents.append(types.Part.from_bytes(data=f.read(), mime_type="image/jpeg"))
+
+        res = await safe_generate(
+            contents=contents,
+            config=types.GenerateContentConfig(
+                safety_settings=[
+                    types.SafetySetting(category='HARM_CATEGORY_DANGEROUS_CONTENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HARASSMENT', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_HATE_SPEECH', threshold='BLOCK_NONE'),
+                    types.SafetySetting(category='HARM_CATEGORY_SEXUALLY_EXPLICIT', threshold='BLOCK_NONE')
+                ]
+            )
+        )
+        await status_msg.edit_text(res.text)
+        
+    except Exception as e:
+        await status_msg.edit_text(f"❌ Soru cevaplanırken bir hata oluştu (Sistem yoğun olabilir):\n`{e}`", parse_mode='Markdown')
+
 async def tarot_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await check_access(update): return
     secilenler = random.sample(TAROT_CARDS, 3)
@@ -1134,6 +1180,7 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/burcyorumla'), burcyorumla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/falbak'), falbak_command))
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/soru'), soru_command)) # YENİ EKLENEN TETİKLEYİCİ
 
     application.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO) & (~filters.COMMAND), log_message))
     
