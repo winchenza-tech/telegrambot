@@ -1069,7 +1069,7 @@ async def soru_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     photo_obj = target_msg.photo[-1] if target_msg.photo else None
     
     metin = update.message.text or update.message.caption or ""
-    temiz_args = re.sub(r'(?i)^/soru(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip()
+    temiz_args = re.sub(r'(?i)^/soruuuuu(?:@[a-zA-Z0-9_]+)?\s*', '', metin).strip()
     
     if not temiz_args and not photo_obj:
         await update.message.reply_text("❗ Lütfen bir soru sorun veya komutu bir görselle birlikte gönderin.")
@@ -1180,7 +1180,7 @@ async def main():
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/burcyorumla'), burcyorumla_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/ozetle'), ozetle_command))
     application.add_handler(MessageHandler(filters.Regex(r'(?i)^/falbak'), falbak_command))
-    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/soru'), soru_command)) # YENİ EKLENEN TETİKLEYİCİ
+    application.add_handler(MessageHandler(filters.Regex(r'(?i)^/soruuuuuu'), soru_command)) # YENİ EKLENEN TETİKLEYİCİ
 
     application.add_handler(MessageHandler((filters.TEXT | filters.PHOTO | filters.VOICE | filters.AUDIO) & (~filters.COMMAND), log_message))
     
